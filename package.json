@@ -1,0 +1,32 @@
+{
+  "name": "discordbot",
+  "version": "1.0.0",
+  "description": "discord bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "ts-node-dev --respawn src/index.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PatrykStyla/DiscordBotJS.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/PatrykStyla/DiscordBotJS/issues"
+  },
+  "homepage": "https://github.com/PatrykStyla/DiscordBotJS#readme",
+  "dependencies": {
+    "@types/mysql": "^2.15.13",
+    "@types/node": "^14.0.12",
+    "discord-akairo": "^8.0.0",
+    "discord.js": "^12.2.0",
+    "mysql": "^2.18.1",
+    "typescript": "^3.9.5"
+  },
+  "devDependencies": {
+    "ts-node": "^8.10.2",
+    "ts-node-dev": "^1.0.0-pre.44"
+  }
+}
