@@ -2,10 +2,11 @@
   "name": "discordbot",
   "version": "1.0.0",
   "description": "discord bot",
-  "main": "index.js",
+  "main": "dist/index.js",
   "scripts": {
     "start": "ts-node-dev --respawn src/index.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prod": "tsc && node ."
   },
   "repository": {
     "type": "git",
@@ -18,15 +19,22 @@
   },
   "homepage": "https://github.com/PatrykStyla/DiscordBotJS#readme",
   "dependencies": {
-    "@types/mysql": "^2.15.13",
-    "@types/node": "^14.0.12",
+    "@discordjs/opus": "^0.3.2",
+    "@types/mysql": "^2.15.15",
+    "@types/node": "^14.0.27",
+    "@types/socket.io": "^2.1.10",
+    "@types/socket.io-client": "^1.4.33",
+    "@types/ws": "^7.2.6",
     "discord-akairo": "^8.0.0",
     "discord.js": "^12.2.0",
+    "ffmpeg-static": "^4.2.6",
     "mysql": "^2.18.1",
-    "typescript": "^3.9.5"
+    "socket.io": "^2.3.0",
+    "typescript": "^3.9.7",
+    "ws": "^7.3.1"
   },
   "devDependencies": {
     "ts-node": "^8.10.2",
-    "ts-node-dev": "^1.0.0-pre.44"
+    "ts-node-dev": "^1.0.0-pre.56"
   }
 }
