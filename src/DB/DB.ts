@@ -14,12 +14,20 @@ import {
 	PartialGuildMember,
 	PartialMessage,
 } from "discord.js";
+import { EnumVoiceState } from "../HandleVoiceState";
 
-interface TablesInDiscordBot {
-	Tables_in_DiscordBot: string;
+export const DEBUG_LOG_ENABLED = {
+	VoiceState: false,
+	AddMessage: false,
+	AddChannel: false,
+	AddUser: false,
+	UpdateUser: false,
 }
 
 class DB {
+	UpdateUser(arg0: GuildMember) {
+		// throw new Error("Method not implemented.");
+	}
 	public pool: Pool;
 	GuildId: string;
 	constructor() {
@@ -81,6 +89,9 @@ class DB {
 	}
 
 	public async AddMessage(message: Message) {
+		if (DEBUG_LOG_ENABLED.AddMessage) {
+			console.log(`message content. id: ${message.id} -> ${message.content}`)
+		}
 		let hasEmbed = false;
 		let hasAttachment = false;
 		let EmbededQuery = "";
@@ -104,6 +115,11 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 	}
 
 	public async AddChannels(channels: Array<Channel>) {
+		if (DEBUG_LOG_ENABLED.AddChannel) {
+			channels.forEach((value) => {
+				console.log(`Channel id: ${value.id} added`)
+			})
+		}
 		let query = "INSERT INTO channels (id, name, type, position) VALUES";
 		let query2 = "INSERT INTO guild_to_channel (guild_id, channel_id) VALUES";
 		channels.forEach((element) => {
@@ -162,13 +178,14 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 		return GuildUsersSet;
 	}
 
-	public async AddGuildUser() {
-		let InsertUsersToGuild = "INSERT INTO user_to_guild (user_id, guild_id) VALUES";
-	}
-
 	// User refers to the the the discord account. It has no assosiation with the guilds(servers) the user is in.
 	// We can only interact with the GuildUser that is in our guild
 	public async AddUsers(Users: Array<User>) {
+		if (DEBUG_LOG_ENABLED.AddUser) {
+			Users.forEach((value) => {
+				console.log(`User id: ${value.id} added`)
+			})
+		}
 		// Inserts the user. This the global user and not a GuildMember
 		let InsertUsers = "INSERT IGNORE INTO users (id, username, discriminator, bot) VALUES";
 		// Link the user to a guild
@@ -249,7 +266,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 		});
 	}
 
-		/**  
+	/**  
 	Partial messages only guarantees the id\
 	When deleting messages we only care about the deleted message and we don't need the rest of information
 	*/
@@ -268,10 +285,21 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 		msgs.forEach((_value, key) => {
 			DeleteMessagesQuery += key + ','
 		})
-		DeleteMessagesQuery = DeleteMessagesQuery.slice(0, -1)  + ");";
+		DeleteMessagesQuery = DeleteMessagesQuery.slice(0, -1) + ");";
 		this.GetQuery(DeleteMessagesQuery);
 	}
+
+	public async AddVoiceState(VoiceState: EnumVoiceState, UserId: string, ChannelId: string, Executor: string = "") {
+		if (DEBUG_LOG_ENABLED.VoiceState) {
+			console.log(`State: ${EnumVoiceState[VoiceState]}, User: ${UserId}, Channel: ${ChannelId}`)
+		}
+
+		let VoiceStateQuery = `INSERT INTO voice_states (user_id, channel_id, category, executor) VALUES ('${UserId}', '${ChannelId}', '${VoiceState}', ${Executor.length > 0 ? `${Executor}` : "NULL"});`
+
+		this.GetQuery(VoiceStateQuery);
+	}
 }
+
 export default DB;
 
 interface ChannelsInterface {
