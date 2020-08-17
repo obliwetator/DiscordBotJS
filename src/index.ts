@@ -1,8 +1,8 @@
 import { token } from "./Config";
 import DB, { LogTypes } from "./DB/DB";
-import { Channel, Client, Collection, TextChannel, User, Message, PartialMessage, VoiceChannel } from "discord.js";
+import { Channel, Client, Collection, TextChannel, User, Message, PartialMessage, VoiceChannel, GuildMember, Guild } from "discord.js";
 import ws from "ws";
-import { HandleVoiceState } from "./HandleVoiceState";
+import { HandleVoiceState, EnumVoiceState } from "./HandleVoiceState";
 
 // process.on("exit", () => {
 // 	console.log('Bot Terminated') 
@@ -11,7 +11,8 @@ import { HandleVoiceState } from "./HandleVoiceState";
 
 // process.on("SIGINT", () => {
 // 	console.log('Program exited')
-// 	client.destroy()
+//	client.destroy()
+// process.exit() ;
 // })
 
 const database: DB = new DB();
@@ -266,7 +267,44 @@ PARAMETER    TYPE               DESCRIPTION
 oldMember    GuildMember        The member before the update
 newMember    GuildMember        The member after the update    */
 client.on("guildMemberUpdate", (oldMember, newMember) => {
-	console.error(`a guild member changes - i.e. new role, removed role, nickname.`);
+	console.warn(`a guild member changes - i.e. new role, removed role, nickname.`);
+
+	if (oldMember instanceof GuildMember && newMember instanceof GuildMember) {
+		if (oldMember.nickname !== newMember.nickname) {
+			// Avatar was changed
+			console.log('Nickname changed')
+		}
+		else if (oldMember.roles.cache.size != newMember.roles.cache.size) {
+			// Role was changed 
+			const a = newMember.roles.cache.difference(oldMember.roles.cache);
+			if (oldMember.roles.cache.size > newMember.roles.cache.size) {
+				// Role was removed
+				let RemovedRole: string;
+				for (const key of oldMember.roles.cache) {
+					if (!oldMember.roles.cache.has(key[0])) {
+						RemovedRole = key[0]
+						break;
+					}
+				}
+			} else {
+				// role was added
+				let AddedRole: string;
+				for (const key of newMember.roles.cache) {
+					if (!oldMember.roles.cache.has(key[0])) {
+						AddedRole = key[0]
+						break;
+					}
+				}
+
+			}
+
+			console.log('Role changed')
+		}
+		else if (oldMember.user !== newMember.user) {
+			console.log('User changed')
+		}
+		database.UpdateUser(newMember as GuildMember);
+	}
 });
 
 // guildUnavailable
@@ -393,9 +431,12 @@ client.on("typingStart", (channel, user) => {
 PARAMETER      TYPE        DESCRIPTION
 oldUser        User        The user before the update
 newUser        User        The user after the update    */
-client.on("userUpdate", (oldUser, newUser) => {
-	console.log(`user's details (e.g. username) are changed`);
-});
+
+// guildMemberUpdate fires when userUpdate fires but not the other way around
+// In other words all the updates will be available under guildMemberUpdate listener
+// client.on("userUpdate", (oldUser, newUser) => {
+// 	console.log(`user's details (e.g. username) are changed`);
+// });
 
 // voiceStateUpdate
 /* Emitted whenever a user changes voice state - e.g. joins/leaves a channel, mutes/unmutes.
@@ -403,32 +444,30 @@ PARAMETER    TYPE             DESCRIPTION
 oldMember    GuildMember      The member before the voice state update
 newMember    GuildMember      The member after the voice state update    */
 client.on("voiceStateUpdate", async (oldState, newState) => {
-	console.log(`a user changes voice state`);
 	// The only way for the properties to be undefined is either
 	// 1) the user to connect for the first time
 	// 2) the bot is connected after a user has joined ( not present in bot chache )
 
-	// const fetchedLogs = await newState.guild.fetchAuditLogs({
-	// 	limit: 1,
-	// 	type: 'MEMBER_UPDATE',
-	// });
-	// const { executor, target } = fetchedLogs.entries.first()!;
+	const fetchedLogs = await newState.guild.fetchAuditLogs({
+		limit: 1,
+		type: 'MEMBER_UPDATE',
+	});
+	const { executor, target } = fetchedLogs.entries.first()!;
 
-	// if (!fetchedLogs) {
-	// 	// No logs. We don't know who performed the action
-	// }
+	if (!fetchedLogs) {
+		// No logs. We don't know who performed the action
+	}
 	if (newState.channel !== null) {
-		HandleVoiceState(oldState, newState);
-
+		HandleVoiceState(oldState, newState, database);
 		// User is still present in the channel
 		// Check what was the action
 		if (oldState.channel === null) {
 			// User Joins a voice channel
-			console.log('User joined channel')
+			database.AddVoiceState(EnumVoiceState.channel_join, newState.id, newState.channelID!)
 		}
 	} else if (newState.channel === null) {
 		// User leaves a voice channel
-		console.log('User left channel')
+		database.AddVoiceState(EnumVoiceState.channel_leave, newState.id, oldState.channelID!)
 	}
 });
 
@@ -454,7 +493,6 @@ client.on(
 		// console.log('Raw message', msg)
 		if (msg.channel.type === "text") {
 			database.AddMessage(msg);
-			console.log(`message content. id: ${msg.id} -> ${msg.content}`)
 			// send the message to all clients
 			WebSocket.send(msg.content);
 		}
@@ -462,4 +500,3 @@ client.on(
 );
 
 client.login(token);
-
