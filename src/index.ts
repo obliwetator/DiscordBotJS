@@ -1,20 +1,21 @@
 import { token } from "./Config";
-import DB from "./DB/DB";
-import { Channel, Client, Collection, TextChannel, User } from "discord.js";
+import DB, { LogTypes } from "./DB/DB";
+import { Channel, Client, Collection, TextChannel, User, Message, PartialMessage, VoiceChannel } from "discord.js";
 import ws from "ws";
+import { HandleVoiceState } from "./HandleVoiceState";
 
-process.on("exit", () => {
-	console.log('Bot Terminated')
-	client.destroy()
-})
+// process.on("exit", () => {
+// 	console.log('Bot Terminated') 
+// 	client.destroy()
+// })
 
-process.on("SIGINT", () => {
-	console.log('Program exited')
-	client.destroy()
-})
+// process.on("SIGINT", () => {
+// 	console.log('Program exited')
+// 	client.destroy()
+// })
 
 const database: DB = new DB();
-const client = new Client();
+const client = new Client({ partials: ['MESSAGE'] });
 const DEBUG_ENABLED = false;
 
 const WebSocket = new ws("wss://patrykstyla.com:8080");
@@ -39,6 +40,7 @@ async function handleGuild(): Promise<void> {
 			client.guilds.cache.first()!,
 			(client.channels.cache as Collection<string, TextChannel>),
 		);
+		console.log(`First time in ${client.guilds.cache.first()?.name}`)
 	}
 }
 
@@ -50,30 +52,35 @@ async function handleChannels(): Promise<void> {
 		if (!channels.has(key)) {
 			// We don't have that channel added. Add it
 			ChannelsToAdd.push(element);
-			console.log("FALSE");
 		}
 	});
 	if (ChannelsToAdd.length > 0) {
 		database.AddChannels(ChannelsToAdd);
+		console.log(`Added new channels`)
 	}
 	// Update ALL channels when connecting to a server
-	if (Object.keys(client.channels.cache).length > 0) {
+	if (client.channels.cache.size > 0) {
 		database.UpdateAllChannels(client.channels);
 	}
+
 }
 
 async function handleUsers(): Promise<void> {
-	let users = await database.GetUsers();
+	let GuildUsers = await database.GetGuildUsers();
 	let UsersToAdd: Array<User> = [];
-	let i = 0;
 	client.users.cache.forEach((element, key) => {
-		if (!users.has(key)) {
+		if (!GuildUsers.has(key)) {
 			// We don't have that user. Add it
 			UsersToAdd.push(element);
 		}
 	});
-	if(UsersToAdd.length > 0) {
+	if (UsersToAdd.length > 0) {
 		database.AddUsers(UsersToAdd);
+		console.log('Added new users')
+	}
+
+	if (client.users.cache.size > 0) {
+
 	}
 
 }
@@ -87,7 +94,7 @@ client.on(
 		handleChannels();
 		// Check all users
 		handleUsers();
-		database.AddLog(`Logged in as ${client.user!.tag}!`);
+		database.AddLog(`Logged in as ${client.user!.tag}!`, LogTypes.general_log);
 	},
 );
 
@@ -97,7 +104,7 @@ client.on(
 		if (channel.type === "text") {
 			let TextChannel = (channel as TextChannel);
 			database.AddChannels([TextChannel]);
-			database.AddLog(`Text Channel Created:  ${TextChannel.name}`);
+			database.AddLog(`Text Channel Created:  ${TextChannel.name}`, LogTypes.channel);
 		}
 	},
 );
@@ -205,12 +212,18 @@ client.on("guildDelete", (guild) => {
 	console.log(`the client deleted/left a guild`);
 });
 
-// guildMemberAvailable
-/* Emitted whenever a member becomes available in a large guild.
+// guildMemberAdd
+/* Emitted whenever a user joins a guild.
 PARAMETER     TYPE               DESCRIPTION
-member        GuildMember        The member that became available    */
-client.on("guildMemberAvailable", (member) => {
-	console.log(`member becomes available in a large guild: ${member.id}`);
+member        GuildMember        The member that has joined a guild    */
+client.on("guildMemberAdd", (member) => {
+	if (member.user) {
+		database.AddUsers([member.user]);
+		database.AddLog(`a user joins a guild: ${member.id}`, LogTypes.guild_member)
+	}
+	else {
+		database.AddLog("Guild member did not have a user?????", LogTypes.guild)
+	}
 });
 
 // guildMemberRemove
@@ -218,7 +231,16 @@ client.on("guildMemberAvailable", (member) => {
 PARAMETER     TYPE               DESCRIPTION
 member        GuildMember        The member that has left/been kicked from the guild    */
 client.on("guildMemberRemove", (member) => {
-	console.log(`a member leaves a guild, or is kicked: ${member.id}`);
+	console.log(`a member leaves a guild, or is kicked: ${member.id} => ${member.displayName}`);
+	database.RemoveUserFromGuild(member);
+});
+
+// guildMemberAvailable
+/* Emitted whenever a member becomes available in a large guild.
+PARAMETER     TYPE               DESCRIPTION
+member        GuildMember        The member that became available    */
+client.on("guildMemberAvailable", (member) => {
+	console.log(`member becomes available in a large guild: ${member.id}`);
 });
 
 // guildMembersChunk
@@ -264,21 +286,27 @@ client.on("guildUpdate", (oldGuild, newGuild) => {
 	console.error(`a guild is updated`);
 });
 
-
 // messageDelete
 /* Emitted whenever a message is deleted.
 PARAMETER      TYPE           DESCRIPTION
 message        Message        The deleted message    */
+// Uses PartialMessage otherwise it won't fire for non-cached messages
 client.on("messageDelete", (message) => {
 	console.log(`message is deleted -> ${message}`);
+
+	database.DeleteMessage(message as PartialMessage);
 });
 
 // messageDeleteBulk
 /* Emitted whenever messages are deleted in bulk.
 PARAMETER    TYPE                              DESCRIPTION
 messages     Collection<Snowflake, Message>    The deleted messages, mapped by their ID    */
+// Uses PartialMessage otherwise it won't fire for non-cached messages
 client.on("messageDeleteBulk", (messages) => {
-	console.log(`messages are deleted -> ${messages}`);
+	messages.forEach((value, key) => {
+		console.log("key => ", key)
+	})
+	database.DeleteMessages(messages as Collection<string, PartialMessage>);
 });
 
 // messageReactionAdd
@@ -325,7 +353,6 @@ newMember    GuildMember        The member after the presence update    */
 //     console.log(`a guild member's presence changes`);
 // });
 
-
 // roleCreate
 /* Emitted whenever a role is created.
 PARAMETER    TYPE        DESCRIPTION
@@ -358,8 +385,8 @@ channel        Channel         The channel the user started typing in
 user           User            The user that started typing    */
 client.on("typingStart", (channel, user) => {
 	console.log(`${user.id} has started typing`);
-});
 
+});
 
 // userUpdate
 /* Emitted whenever a user's details (e.g. username) are changed.
@@ -375,8 +402,34 @@ client.on("userUpdate", (oldUser, newUser) => {
 PARAMETER    TYPE             DESCRIPTION
 oldMember    GuildMember      The member before the voice state update
 newMember    GuildMember      The member after the voice state update    */
-client.on("voiceStateUpdate", (oldMember, newMember) => {
+client.on("voiceStateUpdate", async (oldState, newState) => {
 	console.log(`a user changes voice state`);
+	// The only way for the properties to be undefined is either
+	// 1) the user to connect for the first time
+	// 2) the bot is connected after a user has joined ( not present in bot chache )
+
+	// const fetchedLogs = await newState.guild.fetchAuditLogs({
+	// 	limit: 1,
+	// 	type: 'MEMBER_UPDATE',
+	// });
+	// const { executor, target } = fetchedLogs.entries.first()!;
+
+	// if (!fetchedLogs) {
+	// 	// No logs. We don't know who performed the action
+	// }
+	if (newState.channel !== null) {
+		HandleVoiceState(oldState, newState);
+
+		// User is still present in the channel
+		// Check what was the action
+		if (oldState.channel === null) {
+			// User Joins a voice channel
+			console.log('User joined channel')
+		}
+	} else if (newState.channel === null) {
+		// User leaves a voice channel
+		console.log('User left channel')
+	}
 });
 
 // warn
@@ -392,18 +445,21 @@ client.on(
 	(msg) => {
 		// Ignore own messages
 		if (msg.author.bot) return;
-		// send the message to all clients
-		WebSocket.send(msg.content);
+		// Private messages.
+		// TODO: anything?
+		if (msg.channel.type === "dm") {
+			msg.reply("Some placeholder functionality");
+			return
+		}
 		// console.log('Raw message', msg)
 		if (msg.channel.type === "text") {
 			database.AddMessage(msg);
+			console.log(`message content. id: ${msg.id} -> ${msg.content}`)
+			// send the message to all clients
+			WebSocket.send(msg.content);
 		}
 	},
 );
 
 client.login(token);
-
-
-process.stdin.resume();
-
 
