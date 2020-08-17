@@ -1,5 +1,5 @@
-import {Pool, createPool} from "mysql";
-import {host, password, username} from "../Config";
+import { Pool, createPool } from "mysql";
+import { host, password, username } from "../Config";
 import {
 	CategoryChannel,
 	Channel,
@@ -10,6 +10,9 @@ import {
 	TextChannel,
 	VoiceChannel,
 	User,
+	GuildMember,
+	PartialGuildMember,
+	PartialMessage,
 } from "discord.js";
 
 interface TablesInDiscordBot {
@@ -18,8 +21,6 @@ interface TablesInDiscordBot {
 
 class DB {
 	public pool: Pool;
-	private DB_NAME: string = "DiscordBot";
-	private TablesList: Map<string, string> = new Map();
 	GuildId: string;
 	constructor() {
 		this.pool = createPool({
@@ -33,7 +34,6 @@ class DB {
 			debug: false,
 		});
 		this.GuildId = "";
-		this.GetTables();
 	}
 
 	// private SetQuery<T>(query: string, values: T) {
@@ -75,23 +75,9 @@ class DB {
 		this.GetQuery(sql);
 	}
 
-	private async GetTables() {
-		let a = (await this.GetQuery("show tables") as Array<TablesInDiscordBot>);
-		a.forEach((value) => {
-			this.TablesList.set(
-				value.Tables_in_DiscordBot,
-				value.Tables_in_DiscordBot,
-			);
-		});
-	}
-
-	public GetTableList() {
-		return this.TablesList;
-	}
-
-	public async AddLog(value: string) {
+	public async AddLog(value: string, type: LogTypes) {
 		console.log(value);
-		this.GetQuery(`INSERT INTO log (message) VALUES ('${value}')`);
+		this.GetQuery(`INSERT INTO log (message, category) VALUES ('${value}', '${type}')`);
 	}
 
 	public async AddMessage(message: Message) {
@@ -110,18 +96,11 @@ VALUES ('${message.id}','${message.embeds[0].title}', '${message.embeds[0].type}
 		}
 		await this.GetQuery(
 			`${EmbededQuery}${AttachmentQuery}\
-INSERT IGNORE INTO users (id, username, guild_id, discriminator, bot)\
-VALUES ('${message.author.id}', '${message.author.username}', '${message.guild?.id}',  '${message.author.discriminator}', ${message.author.bot
-				? 1
-				: 0});\
-INSERT INTO channel_messages (id, content, author, type, embeds, attachments, channel_id, guild_id)VALUES ('${message.id}', ${this.pool.escape(
-				message.content,
-			)}, '${message.author.id}', '${message.type}', ${hasEmbed
-				? `${message.id}`
-				: "NULL"}, ${hasAttachment
-				? `${message.attachments.first()?.id}`
-				: "NULL"}, '${message.channel.id}', '${this.GuildId}');`,
-		);
+INSERT IGNORE INTO users (id, username, discriminator, bot)\
+VALUES ('${message.author.id}', '${message.author.username}', '${message.author.discriminator}', ${message.author.bot ? 1 : 0});\
+INSERT INTO channel_messages (id, content, author, type, embeds, attachments, channel_id)
+VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.author.id}', '${message.type}', ${hasEmbed ? `${message.id}` : "NULL"}, ${hasAttachment ? `${message.attachments.first()?.id}` : "NULL"}, '${message.channel.id}');`);
+
 	}
 
 	public async AddChannels(channels: Array<Channel>) {
@@ -129,19 +108,16 @@ INSERT INTO channel_messages (id, content, author, type, embeds, attachments, ch
 		let query2 = "INSERT INTO guild_to_channel (guild_id, channel_id) VALUES";
 		channels.forEach((element) => {
 			// "hack" to make typescript happy
-			if (element.type === "text") {
-				let TextChannel = (element as TextChannel);
-				query += `('${TextChannel.id}', '${TextChannel.name}', '${TextChannel.type}', '${TextChannel.position}'),`;
+			if (element instanceof TextChannel) {
+				query += `('${element.id}', '${element.name}', '${element.type}', '${element.position}'),`;
 			}
-			if (element.type === "voice") {
-				let VoiceChannel = (element as VoiceChannel);
-				query += `('${VoiceChannel.id}', '${VoiceChannel.name}', '${VoiceChannel.type}', '${VoiceChannel.position}'),`;
+			else if (element instanceof VoiceChannel) {
+				query += `('${element.id}', '${element.name}', '${element.type}', '${element.position}'),`;
 			}
-			if (element.type === "category") {
-				let CataegoryChannel = (element as CategoryChannel);
-				query += `('${CataegoryChannel.id}', '${CataegoryChannel.name}', '${CataegoryChannel.type}', '${CataegoryChannel.position}'),`;
+			else if (element instanceof CategoryChannel) {
+				query += `('${element.id}', '${element.name}', '${element.type}', '${element.position}'),`;
 			} else {
-				this.AddLog(`Unimplemeneted type type of type ${element.type}`);
+				this.AddLog(`Unimplemeneted type type of type ${element.type}`, LogTypes.general_log);
 			}
 			query2 += `('${this.GuildId}', '${element.id}'),`;
 		});
@@ -152,51 +128,71 @@ INSERT INTO channel_messages (id, content, author, type, embeds, attachments, ch
 		this.GetQuery(`${query} ${query2}`);
 	}
 
-	public async GetChannels(GuildId: string): Promise<Map<string, string>> {
+	public async GetChannels(GuildId: string): Promise<Set<string>> {
 		if (GuildId === undefined) {
-			this.AddLog("guildId was undefined");
+			this.AddLog("guildId was undefined", LogTypes.general_log);
 		}
 
-		let ChannelMap = new Map();
+		let ChannelMap = new Set<string>();
 
 		let Channels = (await this.GetQuery(
-			`SELECT guild_to_channel.channel_id, channels.name
-                FROM guild_to_channel 
-                LEFT JOIN channels ON guild_to_channel.channel_id = channels.id
-                WHERE guild_to_channel.guild_id =  '${GuildId}' 
-            `,
+			`SELECT guild_to_channel.channel_id 
+			FROM guild_to_channel 
+			WHERE guild_to_channel.guild_id = '${GuildId}'
+			`,
 		) as Array<ChannelsInterface>);
 
 		Channels.forEach((element) => {
-			ChannelMap.set(element.channel_id, element.name);
+			ChannelMap.add(element.channel_id);
 		});
 		return ChannelMap;
 	}
+	// Get ALL users in the guild
+	public async GetGuildUsers(): Promise<Set<string>> {
+		let GuildUsersSet = new Set<string>();
 
-	public async GetUsers(): Promise<Map<string, string>> {
-		let UsersMap = new Map();
-
-		let Users = (await this.GetQuery(`
-			SELECT id ,username, discriminator, bot FROM users WHERE guild_id = ${this.GuildId}
+		let GuildUsers = (await this.GetQuery(`
+			SELECT user_id FROM user_to_guild WHERE guild_id = '${this.GuildId}'
 		`) as Array<UsersInterface>)
 
-		Users.forEach((element) => {
-			UsersMap.set(element.id, element.username + '#' + element.discriminator);
+		GuildUsers.forEach((element) => {
+			GuildUsersSet.add(element.user_id);
 		})
 
-		return UsersMap;
+		return GuildUsersSet;
 	}
 
+	public async AddGuildUser() {
+		let InsertUsersToGuild = "INSERT INTO user_to_guild (user_id, guild_id) VALUES";
+	}
+
+	// User refers to the the the discord account. It has no assosiation with the guilds(servers) the user is in.
+	// We can only interact with the GuildUser that is in our guild
 	public async AddUsers(Users: Array<User>) {
-		let query = "INSERT INTO users (id, guild_id, username, discriminator, bot) VALUES";
+		// Inserts the user. This the global user and not a GuildMember
+		let InsertUsers = "INSERT IGNORE INTO users (id, username, discriminator, bot) VALUES";
+		// Link the user to a guild
+		let InsertUsersToGuild = "INSERT INTO user_to_guild (user_id, guild_id) VALUES";
 
 		Users.forEach((element) => {
-			query += `('${element.id}', '${this.GuildId}', '${element.username}', '${element.discriminator}', ${element.bot ? 1: 0}),`
+			InsertUsers += `('${element.id}', '${element.username}', '${element.discriminator}', ${element.bot ? 1 : 0}),`
+			InsertUsersToGuild += `('${element.id}', '${this.GuildId}'),`
 		})
+		// , -> ;
+		InsertUsers = `${InsertUsers.slice(0, -1)};`;
+		InsertUsersToGuild = `${InsertUsersToGuild.slice(0, -1)};`;
 
-		query = `${query.slice(0, -1)};`;
+		this.GetQuery(`${InsertUsers} ${InsertUsersToGuild}`);
+	}
 
-		this.GetQuery(`${query}`);
+	// User is removed from a guild. That user will be removed from that guild
+	// BUT he will stay in the databse as he may be in other guild
+	public async RemoveUserFromGuild(user: GuildMember | PartialGuildMember) {
+		let RemoveUserFromGuild = `
+		DELETE FROM user_to_guild WHERE user_to_guild.user_id = ${user.id}
+		AND user_to_guild.guild_id = ${user.guild.id}`
+
+		this.GetQuery(RemoveUserFromGuild)
 	}
 
 	public async FirstTimeInGuild(GuildId: string): Promise<boolean> {
@@ -210,63 +206,86 @@ INSERT INTO channel_messages (id, content, author, type, embeds, attachments, ch
 			return true;
 		}
 	}
-	AddGuild(Guild: Guild, Channels: Collection<string, TextChannel>) {
+	public AddGuild(Guild: Guild, Channels: Collection<string, TextChannel>) {
 		// create the query for all the channels
-		let query = "INSERT INTO channels (id, name, type, position) VALUES";
-		let query2 = "INSERT INTO guild_to_channel (guild_id, channel_id) VALUES";
+		let InsertChannels = "INSERT INTO channels (id, name, type, position) VALUES";
+		let InsertChannelsToGuild = "INSERT INTO guild_to_channel (guild_id, channel_id) VALUES";
 		Channels.forEach((element) => {
-			query += `('${element.id}', '${element.name}', '${element.type}', '${element.position}'),`;
-			query2 += `('${Guild.id}', '${element.id}'),`;
+			InsertChannels += `('${element.id}', '${element.name}', '${element.type}', '${element.position}'),`;
+			InsertChannelsToGuild += `('${Guild.id}', '${element.id}'),`;
 		});
 		// replace last , with ;
-		query = `${query.slice(0, -1)};`;
-		query2 = `${query2.slice(0, -1)};`;
+		InsertChannels = `${InsertChannels.slice(0, -1)};`;
+		InsertChannelsToGuild = `${InsertChannelsToGuild.slice(0, -1)};`;
 
 		this.GetQuery(
-			`INSERT INTO guilds (id, name, member_count, owner_id) VALUES ('${Guild.id}', '${Guild.name}', '${Guild.memberCount}', '${Guild.ownerID}');
-                        ${query}
-                        ${query2}
-                        `,
+			`
+				INSERT INTO guilds (id, name , owner_id) VALUES ('${Guild.id}', '${Guild.name}', '${Guild.ownerID}');
+				${InsertChannels}
+				${InsertChannelsToGuild}
+			`,
 		);
 	}
 	public async UpdateAllChannels(Channels: ChannelManager) {
 		let query = "UPDATE `channels` SET `name`=?,`type`=?,`position`=? WHERE `channels`.`id` = ?;";
 		let args: Array<string | number> = [];
 		Channels.cache.forEach((element) => {
-			// "hack" to make typescript happy
-			if (element.type === "text") {
-				let TextChannel = (element as TextChannel);
-				args.push(TextChannel.name, TextChannel.type, TextChannel.position);
-			} else if (element.type === "voice") {
-				let VoiceChannel = (element as VoiceChannel);
-				args.push(VoiceChannel.name, VoiceChannel.type, VoiceChannel.position);
-			} else if (element.type === "category") {
-				let CataegoryChannel = (element as CategoryChannel);
-				args.push(
-					CataegoryChannel.name,
-					CataegoryChannel.type,
-					CataegoryChannel.position,
-				);
-			} else {
-				this.AddLog(`Unimplemeneted type of type ${element.type}`);
+			// A Channel can be any of the 3 subcategories
+			if (element instanceof TextChannel) {
+				args.push(element.name, element.type, element.position);
+			}
+			else if (element instanceof VoiceChannel) {
+				args.push(element.name, element.type, element.position);
+			}
+			else if (element instanceof CategoryChannel) {
+				args.push(element.name, element.type, element.position);
+			}
+			else {
+				this.AddLog(`Unimplemeneted type of type ${element.type}`, LogTypes.channel);
 			}
 			args.push(element.id);
 			this.GetQueryArg(query, args);
 			args = [];
 		});
 	}
+
+		/**  
+	Partial messages only guarantees the id\
+	When deleting messages we only care about the deleted message and we don't need the rest of information
+	*/
+	public async DeleteMessage(msg: PartialMessage) {
+		// throw new Error("Method not implemented.");
+		let DeleteMessageQuery = `UPDATE channel_messages SET is_deleted=1 WHERE id = '${msg.id}'`;
+
+		this.GetQuery(DeleteMessageQuery);
+	}
+	/** 
+	Partial messages only guarantees the id\
+	When deleting messages we only care about the deleted message and we don't need the rest of information
+	*/
+	public async DeleteMessages(msgs: Collection<string, PartialMessage>) {
+		let DeleteMessagesQuery = "UPDATE channel_messages SET is_deleted=1 WHERE id IN (";
+		msgs.forEach((_value, key) => {
+			DeleteMessagesQuery += key + ','
+		})
+		DeleteMessagesQuery = DeleteMessagesQuery.slice(0, -1)  + ");";
+		this.GetQuery(DeleteMessagesQuery);
+	}
 }
 export default DB;
 
 interface ChannelsInterface {
-	channel_id: string;
-	name: string;
+	channel_id: string
 }
 
 interface UsersInterface {
-	id: string,
-	guild_id?: string,
-	username: string,
-	discriminator: string,
-	bot: boolean
+	user_id: string
+}
+
+export enum LogTypes {
+	general_log,
+	guild,
+	channel,
+	user,
+	guild_member,
 }
