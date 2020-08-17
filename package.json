@@ -26,8 +26,8 @@
     "@types/socket.io-client": "^1.4.33",
     "@types/ws": "^7.2.6",
     "discord-akairo": "^8.1.0",
-    "discord.js": "^12.2.0",
-    "ffmpeg-static": "^4.2.6",
+    "discord.js": "^12.3.1",
+    "ffmpeg-static": "^4.2.7",
     "mysql": "^2.18.1",
     "socket.io": "^2.3.0",
     "typescript": "^3.9.7",
@@ -35,6 +35,6 @@
   },
   "devDependencies": {
     "ts-node": "^8.10.2",
-    "ts-node-dev": "^1.0.0-pre.56"
+    "ts-node-dev": "^1.0.0-pre.57"
   }
 }
