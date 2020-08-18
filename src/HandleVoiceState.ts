@@ -61,7 +61,7 @@ export async function HandleVoiceState(oldState: VoiceState, newState: VoiceStat
 		database.AddVoiceState(EnumVoiceState.streaming_start, newState.id, newState.channelID!)
 		return;
 	}
-	else if (!oldState.streaming && oldState.streaming) {
+	else if (!newState.streaming && oldState.streaming) {
 		// User stopped streaming
 		database.AddVoiceState(EnumVoiceState.streaming_stop, newState.id, newState.channelID!)
 		return;
