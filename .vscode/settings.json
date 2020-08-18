@@ -1,0 +1,6 @@
+{
+    "terminal.integrated.env.linux": {
+        "GPG_TTY": "$(tty)"
+     },
+    "git.enableCommitSigning": true
+}
