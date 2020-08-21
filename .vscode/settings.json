@@ -1,6 +1,7 @@
 {
     "terminal.integrated.env.linux": {
         "GPG_TTY": "$(tty)"
-     },
-    "git.enableCommitSigning": true
+    },
+    "git.enableCommitSigning": false,
+    "typescript.tsdk": "node_modules/typescript/lib"
 }
