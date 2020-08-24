@@ -1,6 +1,6 @@
 import { token } from "./Config";
-import DB, { LogTypes } from "./DB/DB";
-import { Channel, Client, Collection, TextChannel, User, Message, PartialMessage, VoiceChannel, GuildMember, Guild } from "discord.js";
+import DB, { DEBUG_LOG_ENABLED, LogTypes } from "./DB/DB";
+import { Channel, Client, Collection, TextChannel, PartialMessage, GuildMember, Role } from "discord.js";
 import ws from "ws";
 import { HandleVoiceState, EnumVoiceState } from "./HandleVoiceState";
 
@@ -34,7 +34,7 @@ WebSocket.on(
 
 
 async function handleGuild(): Promise<void> {
-	let GuildKey = client.guilds.cache.firstKey();
+	const GuildKey = client.guilds.cache.firstKey();
 	database.GuildId = GuildKey!;
 	if (await database.FirstTimeInGuild(GuildKey!)) {
 		database.AddGuild(
@@ -47,8 +47,8 @@ async function handleGuild(): Promise<void> {
 
 async function handleChannels(): Promise<void> {
 	// Check if the chanels match up since last login
-	let channels = await database.GetChannels(database.GuildId!);
-	let ChannelsToAdd: Array<Channel> = [];
+	const channels = await database.GetChannels(database.GuildId!);
+	const ChannelsToAdd: Array<Channel> = [];
 	client.channels.cache.forEach((element, key) => {
 		if (!channels.has(key)) {
 			// We don't have that channel added. Add it
@@ -67,17 +67,26 @@ async function handleChannels(): Promise<void> {
 }
 
 async function handleUsers(): Promise<void> {
-	let GuildUsers = await database.GetGuildUsers();
-	let UsersToAdd: Array<User> = [];
-	client.users.cache.forEach((element, key) => {
-		if (!GuildUsers.has(key)) {
+	const GuildMembers = await database.GetGuildUsers();
+	const UsersToAdd: Array<GuildMember> = [];
+	client.guilds.cache.first()?.members.cache.forEach((element, key) => {
+		if (!GuildMembers.has(key)) {
 			// We don't have that user. Add it
 			UsersToAdd.push(element);
+			GuildMembers.delete(key)
+		}
+		else {
+			GuildMembers.delete(key)
 		}
 	});
 	if (UsersToAdd.length > 0) {
-		database.AddUsers(UsersToAdd);
-		console.log('Added new users')
+		await database.AddUsers(UsersToAdd);
+		database.AddGuildMembers(UsersToAdd);
+	}
+	// Remove any user that we itterate over.
+	// Any User that's left is NOT present in the guild and has to be removed from the DB.
+	if (GuildMembers.size > 0) {
+		database.RemoveUsersFromGuild(GuildMembers)
 	}
 
 	if (client.users.cache.size > 0) {
@@ -86,15 +95,56 @@ async function handleUsers(): Promise<void> {
 
 }
 
+/**
+ * 
+ */
+async function handleRoles(): Promise<void> {
+	const Roles = await database.GetRoles();
+
+	const RolesToAdd: Array<Role> = [];
+
+	client.guilds.cache.first()?.roles.cache.forEach((element, key) => {
+		if (!Roles.has(key)) {
+			// We DON'T have that role in our db
+			RolesToAdd.push(element);
+			Roles.delete(key)
+		}
+		else {
+			// We HAVE that role in our db
+			Roles.delete(key)
+		}
+	});
+	// Remove any role that we itterate over.
+	// Any role that's left is NOT present in the guild and has to be removed from the DB.
+	if (Roles.size > 0) {
+		if (DEBUG_LOG_ENABLED.RoleDeletedFromGuild) {
+			Roles.forEach((key) => {
+				console.log(`Role id: ${key} has is not present in the guild anymore`)
+			})
+		}
+		database.RemoveRoles(Roles)
+	}
+	// Add ALL the roles in the current guild.
+	if (RolesToAdd.length > 0) {
+		if (DEBUG_LOG_ENABLED.RoleAddedToGuild) {
+			
+		}
+		await database.AddRoles(RolesToAdd);
+	}
+	database.UpdateAllRoles(client.guilds.cache.first()?.members.cache!);
+}
+
 client.on(
 	"ready",
-	async () => {
+	async () => {	
 		// register guild etc...
 		handleGuild();
 		// on joining check all channels since they bot is joining first time/ hasn't joined for a while
 		handleChannels();
 		// Check all users
 		handleUsers();
+
+		handleRoles();
 		database.AddLog(`Logged in as ${client.user!.tag}!`, LogTypes.general_log);
 	},
 );
@@ -103,7 +153,7 @@ client.on(
 	"channelCreate",
 	(channel) => {
 		if (channel.type === "text") {
-			let TextChannel = (channel as TextChannel);
+			const TextChannel = (channel as TextChannel);
 			database.AddChannels([TextChannel]);
 			database.AddLog(`Text Channel Created:  ${TextChannel.name}`, LogTypes.channel);
 		}
@@ -217,9 +267,12 @@ client.on("guildDelete", (guild) => {
 /* Emitted whenever a user joins a guild.
 PARAMETER     TYPE               DESCRIPTION
 member        GuildMember        The member that has joined a guild    */
-client.on("guildMemberAdd", (member) => {
+client.on("guildMemberAdd", async (member) => {
 	if (member.user) {
-		database.AddUsers([member.user]);
+		// First add global user
+		await database.AddUsers([member] as Array<GuildMember>);
+		// Then add guild user
+		database.AddGuildMembers([member] as Array<GuildMember>);
 		database.AddLog(`a user joins a guild: ${member.id}`, LogTypes.guild_member)
 	}
 	else {
@@ -233,7 +286,9 @@ PARAMETER     TYPE               DESCRIPTION
 member        GuildMember        The member that has left/been kicked from the guild    */
 client.on("guildMemberRemove", (member) => {
 	console.log(`a member leaves a guild, or is kicked: ${member.id} => ${member.displayName}`);
-	database.RemoveUserFromGuild(member);
+	// TODO Create dedicated function to delete only 1 user?
+	const a = new Set(member.id);
+	database.RemoveUsersFromGuild(a);
 });
 
 // guildMemberAvailable
@@ -276,13 +331,13 @@ client.on("guildMemberUpdate", (oldMember, newMember) => {
 		}
 		else if (oldMember.roles.cache.size != newMember.roles.cache.size) {
 			// Role was changed 
-			const a = newMember.roles.cache.difference(oldMember.roles.cache);
 			if (oldMember.roles.cache.size > newMember.roles.cache.size) {
 				// Role was removed
 				let RemovedRole: string;
 				for (const key of oldMember.roles.cache) {
 					if (!oldMember.roles.cache.has(key[0])) {
-						RemovedRole = key[0]
+						RemovedRole = key[0];
+						database.AddGuildMemberRole(newMember.id, RemovedRole)
 						break;
 					}
 				}
@@ -291,11 +346,11 @@ client.on("guildMemberUpdate", (oldMember, newMember) => {
 				let AddedRole: string;
 				for (const key of newMember.roles.cache) {
 					if (!oldMember.roles.cache.has(key[0])) {
-						AddedRole = key[0]
+						AddedRole = key[0];
+						database.RemoveGuildMemberRole(newMember.id, AddedRole)
 						break;
 					}
 				}
-
 			}
 
 			console.log('Role changed')
@@ -397,13 +452,14 @@ PARAMETER    TYPE        DESCRIPTION
 role         Role        The role that was created    */
 client.on("roleCreate", (role) => {
 	console.error(`a role is created`);
+
 });
 
 // roleDelete
 /* Emitted whenever a guild role is deleted.
 PARAMETER    TYPE        DESCRIPTION
 role         Role        The role that was deleted    */
-client.on("roleDelete", (role) => {
+client.on("roleDelete", (_role) => {
 	console.error(`a guild role is deleted`);
 });
 
@@ -448,15 +504,6 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
 	// 1) the user to connect for the first time
 	// 2) the bot is connected after a user has joined ( not present in bot chache )
 
-	const fetchedLogs = await newState.guild.fetchAuditLogs({
-		limit: 1,
-		type: 'MEMBER_UPDATE',
-	});
-	const { executor, target } = fetchedLogs.entries.first()!;
-
-	if (!fetchedLogs) {
-		// No logs. We don't know who performed the action
-	}
 	if (newState.channel !== null) {
 		HandleVoiceState(oldState, newState, database);
 		// User is still present in the channel
