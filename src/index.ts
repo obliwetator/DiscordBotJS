@@ -1,8 +1,12 @@
 import { token } from "./Config";
 import DB, { DEBUG_LOG_ENABLED, LogTypes } from "./DB/DB";
-import { Channel, Client, Collection, TextChannel, PartialMessage, GuildMember, Role } from "discord.js";
+import { Channel, Client, Collection, TextChannel, PartialMessage, GuildMember, Role, User } from "discord.js";
 import ws from "ws";
 import { HandleVoiceState, EnumVoiceState } from "./HandleVoiceState";
+
+import { obs } from "../timer";
+
+
 
 // process.on("exit", () => {
 // 	console.log('Bot Terminated') 
@@ -134,18 +138,16 @@ async function handleRoles(): Promise<void> {
 	database.UpdateAllRoles(client.guilds.cache.first()?.members.cache!);
 }
 
-client.on(
-	"ready",
-	async () => {	
-		// register guild etc...
-		handleGuild();
-		// on joining check all channels since they bot is joining first time/ hasn't joined for a while
-		handleChannels();
-		// Check all users
-		handleUsers();
+client.on("ready", async () => {
+	// register guild etc...
+	handleGuild();
+	// on joining check all channels since they bot is joining first time/ hasn't joined for a while
+	handleChannels();
+	// Check all users
+	handleUsers();
 
-		handleRoles();
-		database.AddLog(`Logged in as ${client.user!.tag}!`, LogTypes.general_log);
+	handleRoles();
+	database.AddLog(`Logged in as ${client.user!.tag}!`, LogTypes.general_log);
 	},
 );
 
@@ -322,8 +324,6 @@ PARAMETER    TYPE               DESCRIPTION
 oldMember    GuildMember        The member before the update
 newMember    GuildMember        The member after the update    */
 client.on("guildMemberUpdate", (oldMember, newMember) => {
-	console.warn(`a guild member changes - i.e. new role, removed role, nickname.`);
-
 	if (oldMember instanceof GuildMember && newMember instanceof GuildMember) {
 		if (oldMember.nickname !== newMember.nickname) {
 			// Avatar was changed
@@ -337,7 +337,7 @@ client.on("guildMemberUpdate", (oldMember, newMember) => {
 				for (const key of oldMember.roles.cache) {
 					if (!oldMember.roles.cache.has(key[0])) {
 						RemovedRole = key[0];
-						database.AddGuildMemberRole(newMember.id, RemovedRole)
+						database.RemoveGuildMemberRole(newMember.id, RemovedRole)
 						break;
 					}
 				}
@@ -347,18 +347,16 @@ client.on("guildMemberUpdate", (oldMember, newMember) => {
 				for (const key of newMember.roles.cache) {
 					if (!oldMember.roles.cache.has(key[0])) {
 						AddedRole = key[0];
-						database.RemoveGuildMemberRole(newMember.id, AddedRole)
+						database.AddGuildMemberRole(newMember.id, AddedRole)
 						break;
 					}
 				}
 			}
-
 			console.log('Role changed')
 		}
 		else if (oldMember.user !== newMember.user) {
 			console.log('User changed')
 		}
-		database.UpdateUser(newMember as GuildMember);
 	}
 });
 
@@ -384,10 +382,40 @@ client.on("guildUpdate", (oldGuild, newGuild) => {
 PARAMETER      TYPE           DESCRIPTION
 message        Message        The deleted message    */
 // Uses PartialMessage otherwise it won't fire for non-cached messages
-client.on("messageDelete", (message) => {
-	console.log(`message is deleted -> ${message}`);
+client.on("messageDelete", async (message) => {
+	console.log(`message is deleted -> ${message.id}`);
+	// Ignore DM deletions
+	if (!message.guild) 
+	{
+		database.DeleteMessage(message as PartialMessage);
+		console.log('Priv Message Deleted');
+		return;
+	}
 
 	database.DeleteMessage(message as PartialMessage);
+
+	// const fetchedLogs = await message.guild.fetchAuditLogs({
+	// 	limit: 1,
+	// 	type: 'MESSAGE_DELETE',
+	// });
+	// const deletionLog = fetchedLogs.entries.first();
+	// if (!deletionLog) {
+	// 	database.DeleteMessage(message as PartialMessage);
+	// 	return // No logs for this deletion
+	// }
+
+	return // No logs for this deletion
+
+	// const { executor, target } = deletionLog;
+	// if (deletionLog.id === message.id) {
+	// 	// TODO: FIX
+	// 	// We know who deleted the message
+	// 	database.DeleteMessageExecutor(message as PartialMessage, executor.id, deletionLog.createdTimestamp);
+	// } else {
+	// 	// The log doesn't match up with the action.
+	// 	// We don't know who deleted the message
+	// 	database.DeleteMessage(message as PartialMessage);
+	// }
 });
 
 // messageDeleteBulk
@@ -395,9 +423,35 @@ client.on("messageDelete", (message) => {
 PARAMETER    TYPE                              DESCRIPTION
 messages     Collection<Snowflake, Message>    The deleted messages, mapped by their ID    */
 // Uses PartialMessage otherwise it won't fire for non-cached messages
-client.on("messageDeleteBulk", (messages) => {
+client.on("messageDeleteBulk", async (messages) => {
+	const fetchedLogs = await messages.first()?.guild?.fetchAuditLogs({
+		limit: 1,
+		type: 'MESSAGE_BULK_DELETE',
+	});
+
+	const deletionLog = fetchedLogs?.entries.first();
+
+	if (!deletionLog) {
+		database.DeleteMessages(messages as Collection<string, PartialMessage>);
+		return // No logs for this deletion
+	}
+
+	// const a = database.GetDeletionLogByTimestamp(deletionLog.createdTimestamp);
+
+	if (false) {
+		// TODO: FIX
+		// No way to EASILY and reliably find who is the executor
+		// It involves adding the timestamp and seeing if there is a different count of objects deletd
+		// We know who deleted the message
+		// database.DeleteMessagesExecutor(messages as Collection<string, PartialMessage>, deletionLog.executor.id, deletionLog.createdTimestamp);
+	} else {
+		// The log doesn't match up with the action.
+		// We don't know who deleted the message
+		database.DeleteMessages(messages as Collection<string, PartialMessage>);
+	}
+
 	messages.forEach((value, key) => {
-		console.log("key => ", key)
+		console.log("key => ", key, value)
 	})
 	database.DeleteMessages(messages as Collection<string, PartialMessage>);
 });
@@ -530,12 +584,19 @@ client.on(
 	"message",
 	(msg) => {
 		// Ignore own messages
-		if (msg.author.bot) return;
+		// This can cause infinte loops
+		if (msg.author.id === client.user?.id)
+		{
+			database.AddMessageDM(msg);
+			return;
+		}
+			
 		// Private messages.
 		// TODO: anything?
 		if (msg.channel.type === "dm") {
+			database.AddMessageDM(msg);
 			msg.reply("Some placeholder functionality");
-			return
+			return;
 		}
 		// console.log('Raw message', msg)
 		if (msg.channel.type === "text") {
@@ -547,3 +608,8 @@ client.on(
 );
 
 client.login(token);
+
+
+client.on("rateLimit" , (a) => {
+	console.log('RATE LIMIT', a);
+})

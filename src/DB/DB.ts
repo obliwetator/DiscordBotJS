@@ -11,33 +11,46 @@ import {
 	VoiceChannel,
 	GuildMember,
 	PartialMessage,
-	Role,
+	Role
 } from "discord.js";
 import { EnumVoiceState } from "../HandleVoiceState";
 
-import { performance } from 'perf_hooks';
+import { performance, PerformanceObserver } from 'perf_hooks';
+import util from 'util';
 
 export const DEBUG_LOG_ENABLED = {
 	VoiceState: false,
 	AddMessage: false,
+	AddMessageDM: false,
 	AddChannel: false,
 	AddUser: false,
 	UpdateUser: false,
 	AddRoles: false,
 	AddGuildMember: false,
 	RoleDeletedFromGuild: false,
-	RoleAddedToGuild: true,
+	RoleAddedToGuild: false,
+	DeleteMessage: false,
+	DeleteMessageBulk: false,
+	DeleteMessageExecutor: false,
+	DeleteMessageBulkExecutor: false
 }
 
 class DB {
+	/**
+	 * Remove a single role for a single user
+	 */
 	RemoveGuildMemberRole(id: string, AddedRole: string) {
-		throw new Error("Method not implemented.");
+		let RemoveRoles = `DELETE FROM guild_users_to_roles WHERE user_id = '${id}' AND role_id = '${AddedRole}'`;
+
+		this.GetQuery(RemoveRoles);
 	}
+	/**
+	 * Add a single role for a single user
+	 */
 	AddGuildMemberRole(id: string, RemovedRole: string) {
-		throw new Error("Method not implemented.");
-	}
-	UpdateUser(arg0: GuildMember) {
-		// throw new Error("Method not implemented.");
+		let AddRole = `INSERT INTO guild_users_to_roles (user_id, role_id) VALUES ('${id}', '${RemovedRole}')`;
+
+		this.GetQuery(AddRole);
 	}
 	public pool: Pool;
 	GuildId: string;
@@ -62,12 +75,11 @@ class DB {
 	// }
 	private GetQuery(query: string): Promise<[]> {
 		return new Promise((resolve, reject) => {
-			this.pool.query(
-				query,
-				(error, results) => {
+			this.pool.query(query, (error, results) => {
 					if (error) {
 						return reject(error);
 					}
+					
 					return resolve(results);
 				},
 			);
@@ -121,8 +133,42 @@ VALUES ('${message.id}','${message.embeds[0].title}', '${message.embeds[0].type}
 INSERT IGNORE INTO users (id, username, discriminator, bot)\
 VALUES ('${message.author.id}', '${message.author.username}', '${message.author.discriminator}', ${message.author.bot ? 1 : 0});\
 INSERT INTO channel_messages (id, content, author, type, embeds, attachments, channel_id)
-VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.author.id}', '${message.type}', ${hasEmbed ? `${message.id}` : "NULL"}, ${hasAttachment ? `${message.attachments.first()?.id}` : "NULL"}, '${message.channel.id}');`);
+VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.author.id}', '${message.type}', ${hasEmbed ? `${message.id}` : "NULL"}, ${hasAttachment ? `${message.attachments.first()?.id}` : "NULL"}, '${message.channel.id}');`)
+;
+	}
+	/**
+	 * Every DM is unique between the bot and the recepient.\
+	 * As such we have no guarantee that we have it in out DB\
+	 * We have to check every time if the DM channel is in out DB\
+	 */
+	public async AddMessageDM(message: Message) {
+		if (DEBUG_LOG_ENABLED.AddMessageDM) {
+			console.log(`message DM. id: ${message.id} -> ${message.content}`)
+		}
+		// TODO: Add local state to check against?
+		const AddDMChannelQuery = `INSERT IGNORE INTO channels_dm (id, recepient) VALUES ('${message.channel.id}', '${message.author.id}')`;
+		await this.GetQuery(AddDMChannelQuery);
 
+		let hasEmbed = false;
+		let hasAttachment = false;
+		let EmbededQuery = "";
+		let AttachmentQuery = "";
+		if (message.embeds.length > 0) {
+			hasEmbed = true;
+			EmbededQuery += `INSERT INTO embedded_messages (id,title, type, description, url, fields, footer, thumbnail, video, image, author, color)\
+VALUES ('${message.id}','${message.embeds[0].title}', '${message.embeds[0].type}', '${message.embeds[0].description}', '${message.embeds[0].url}', '${message.embeds[0].fields}', '${message.embeds[0].footer}', '${message.embeds[0].thumbnail}', '${message.embeds[0].video}', '${message.embeds[0].image}', '${message.embeds[0].author}', '${message.embeds[0].color}');`;
+		}
+		if (message.attachments.size > 0) {
+			hasAttachment = true;
+			AttachmentQuery += `INSERT INTO attachment_messages (id, attachment, name, size, url)VALUES ('${message.attachments.first()?.id}', '${message.attachments.first()?.attachment}', '${message.attachments.first()?.name}', '${message.attachments.first()?.size}', '${message.attachments.first()?.url}');`;
+		}
+		await this.GetQuery(
+			`${EmbededQuery}${AttachmentQuery}\
+INSERT IGNORE INTO users (id, username, discriminator, bot)\
+VALUES ('${message.author.id}', '${message.author.username}', '${message.author.discriminator}', ${message.author.bot ? 1 : 0});\
+INSERT INTO channel_messages (id, content, author, type, embeds, attachments, channel_dm_id)
+VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author.id}', '${message.type}', ${hasEmbed ? `${message.id}` : "NULL"}, ${hasAttachment ? `${message.attachments.first()?.id}` : "NULL"}, '${message.channel.id}');`)
+;
 	}
 
 	public async AddChannels(channels: Array<Channel>) {
@@ -152,6 +198,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 		query2 = `${query2.slice(0, -1)};`;
 
 		this.GetQuery(`${query} ${query2}`);
+
 	}
 	/**
 	 * Add ALL the roles in a guild
@@ -190,8 +237,6 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 			`${GetUserToRoles}`
 		) as Array<UserToRoleInterface>)
 
-		const t0 = performance.now();
-
 		UserToRoles.forEach((element) => {
 			if (!UserToRoleMap.has(element.user_id)) {
 				// Create new Set and 
@@ -202,23 +247,42 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 			}
 		})
 
-		// Check If the roles min server match up with db
+		// Check If the roles in server match up with db
 		cache.forEach(element => {
 			element.roles.cache.forEach((Role) => {
 				if (!UserToRoleMap.get(element.id)?.has(Role.id)) {
+					// We don't have that role for that user
+					if (UserRolesToAdd.has(element.id)) {
+						// We have a map for that user
+						UserRolesToAdd.get(element.id)?.add(Role.id);
+
+					} else {
+						// we don't have map. Create a new one
+						UserRolesToAdd.set(element.id, new Set([Role.id]));
+					}
 					// We don't have ANY roles for that user
-					console.log('User doesn\'t have that role');
 				}
-				else {
-					// We have some role(s) for that user
-					console.log('User has that role');
+				else if (UserToRoleMap.get(element.id)?.has(Role.id)) {
+					// We have that role for that user
+
+					// Remove that role from the map
+					// ANy leftover role(s) are present in the DB but NOT in the server and have to be removed
+					UserToRoleMap.get(element.id)?.delete(Role.id)
 				}
 			})
-
+			if (UserToRoleMap.get(element.id)?.size === 0) {
+				// IF the user has no roles to be removed, remove them from the map
+				UserToRoleMap.delete(element.id);
+			}
 		});
-		const t1 = performance.now();
-		console.log(`Call to doSomething took ${t1 - t0} milliseconds.`);
-		console.log(UserToRoleMap)
+		// Add the roles to the db
+		if (UserRolesToAdd.size > 0) {
+			this.AddRolesToUsers(UserRolesToAdd)
+		}
+		// Remove the roles from db
+		if (UserToRoleMap.size > 0) {
+			this.RemoveRolesFromUsers(UserToRoleMap)
+		}
 	}
 	/**
 	 * Remove Roles AND everything they are linked to
@@ -240,6 +304,46 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 		DeleteRole = DeleteRole.slice(0, -1) + ");";
 
 		this.GetQuery(`${DeleteRole}`)
+
+	}
+
+	/**
+	 * Meant to run on ready
+	 * Add all roles that are out of sync
+	 */
+	public async AddRolesToUsers(UserRolesToAdd: Map<string, Set<string>>) {
+		let AddUsersRoles = "INSERT INTO guild_users_to_roles (user_id, role_id) VALUES"
+
+		UserRolesToAdd.forEach((UserId, key) => {
+			UserId.forEach((RoleId) => {
+				AddUsersRoles += `('${key}', '${RoleId}'),`
+			})
+		})
+
+		AddUsersRoles = `${AddUsersRoles.slice(0, -1)};`;
+
+		this.GetQuery(AddUsersRoles);
+	}
+
+	/**
+	 * Meant to run on ready
+	 * Removes all roles that are out of sync
+	 */
+	public async RemoveRolesFromUsers(RolesToRemove: Map<string, Set<string>>) {
+		let DeleteUserRole = "DELETE FROM guild_users_to_roles WHERE user_id IN(";
+		let query2 = "";
+
+		RolesToRemove.forEach((UserId, key) => {
+			UserId.forEach(RoleId => {
+				DeleteUserRole += key + ",";
+				query2 += RoleId + ",";
+			});
+		});
+		query2 = query2.slice(0, -1) + ")";
+		DeleteUserRole = DeleteUserRole.slice(0, -1) + ")";
+		DeleteUserRole += "AND role_id IN (" + query2;
+
+		this.GetQuery(DeleteUserRole);
 	}
 
 	/**
@@ -258,7 +362,6 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 			WHERE guild_to_channel.guild_id = '${GuildId}'
 			`,
 		) as Array<ChannelsInterface>);
-
 
 		Channels.forEach((element) => {
 			ChannelMap.add(element.channel_id);
@@ -321,7 +424,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 		InsertGuildUser = `${InsertGuildUser.slice(0, -1)};`;
 		InsertGuildUserRoles = `${InsertGuildUserRoles.slice(0, -1)};`;
 
-		this.GetQuery(`${InsertGuildUser} ${InsertGuildUserRoles}`)
+		this.GetQuery(`${InsertGuildUser} ${InsertGuildUserRoles}`);
 	}
 
 	// User refers to the the the discord account. It has no assosiation with the guilds(servers) the user is in.
@@ -360,7 +463,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 
 		RemoveUsersFromGuild += ";";
 
-		this.GetQuery(RemoveUsersFromGuild)
+		this.GetQuery(RemoveUsersFromGuild);
 	}
 
 	public async FirstTimeInGuild(GuildId: string): Promise<boolean> {
@@ -415,29 +518,77 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 			this.GetQueryArg(query, args);
 			args = [];
 		});
+
 	}
 
 	/**  
-	Partial messages only guarantees the id\
-	When deleting messages we only care about the deleted message and we don't need the rest of information
+	 *Partial messages only guarantees the id\
+	 *When deleting messages we only care about the deleted message and we don't need the rest of information
 	*/
 	public async DeleteMessage(msg: PartialMessage) {
-		// throw new Error("Method not implemented.");
-		const DeleteMessageQuery = `UPDATE channel_messages SET is_deleted=1 WHERE id = '${msg.id}'`;
+		if (DEBUG_LOG_ENABLED.DeleteMessage) {
+			console.log("Message Deleted =>" , msg);
+		}
+		const UpdateDeleteMessageQuery = `UPDATE channel_messages SET is_deleted=1 WHERE id = '${msg.id}';`;
+		const DeleteMessageQuery = `INSERT INTO channel_messages_deleted (message_id, deleted_at) VALUES ('${msg.id}', '${Date.now()}');`
 
-		this.GetQuery(DeleteMessageQuery);
+		this.GetQuery(UpdateDeleteMessageQuery + DeleteMessageQuery);
+	}
+	/**  
+	 * Same as base function but we know who deleted the message
+	*/
+	public async DeleteMessageExecutor(msg: PartialMessage, executor: string = "", timestamp: number) {
+		if (DEBUG_LOG_ENABLED.DeleteMessageExecutor) {
+			console.log(`Message Deleted, Executor: ${executor} =>`, msg);
+		}
+
+		const DeleteMessageQuery = `UPDATE channel_messages SET is_deleted=1 WHERE id = '${msg.id}';`;
+		const AddExecutor = `INSERT INTO channel_messages_deleted (message_id, executor, deleted_at) VALUES ('${msg.id}', '${executor}', '${timestamp}');`
+
+		this.GetQuery(`${DeleteMessageQuery} ${AddExecutor}`);
 	}
 	/** 
-	Partial messages only guarantees the id\
-	When deleting messages we only care about the deleted message and we don't need the rest of information
+	*Partial messages only guarantees the id\
+	*When deleting messages we only care about the deleted message and we don't need the rest of information
 	*/
 	public async DeleteMessages(msgs: Collection<string, PartialMessage>) {
+		if (DEBUG_LOG_ENABLED.DeleteMessageBulk) {
+			msgs.forEach((element) => {
+				console.log("Message Deleted =>" , element);
+			})
+		}
 		let DeleteMessagesQuery = "UPDATE channel_messages SET is_deleted=1 WHERE id IN (";
+		let DeleteMessageQuery = `INSERT INTO channel_messages_deleted (message_id, deleted_at) VALUES `;
+		const CurrentTimestamp = Date.now();
+
 		msgs.forEach((_value, key) => {
-			DeleteMessagesQuery += key + ','
+			DeleteMessagesQuery += key + ',';
+			DeleteMessageQuery += `('${key}' , '${CurrentTimestamp}'),`
 		})
 		DeleteMessagesQuery = DeleteMessagesQuery.slice(0, -1) + ");";
-		this.GetQuery(DeleteMessagesQuery);
+		DeleteMessageQuery = DeleteMessageQuery.slice(0, -1) + ";";
+
+		this.GetQuery(DeleteMessagesQuery + DeleteMessageQuery);
+	}
+
+	public async DeleteMessagesExecutor(msgs: Collection<string, PartialMessage>, executor: string, timestamp: number) {
+		if (DEBUG_LOG_ENABLED.DeleteMessageBulkExecutor) {
+			msgs.forEach((element) => {
+				console.log(`Message Deleted, Executor: ${executor} =>`, element);
+			})
+		}
+
+		let DeleteMessagesQuery = "UPDATE channel_messages SET is_deleted=1 WHERE id IN (";
+		let AddExecutor = `INSERT INTO channel_messages_deleted (message_id, executor, deleted_at) VALUES`
+		msgs.forEach((_value, key) => {
+			DeleteMessagesQuery += key + ','
+			AddExecutor += `(${key}, ${executor}, ${timestamp}),`
+		})
+
+		DeleteMessagesQuery = DeleteMessagesQuery.slice(0, -1) + ");";
+		AddExecutor = AddExecutor.slice(0, -1) + ";";
+
+		this.GetQuery(DeleteMessagesQuery + AddExecutor);
 	}
 
 	public async AddVoiceState(VoiceState: EnumVoiceState, UserId: string, ChannelId: string, Executor: string = "") {
@@ -449,10 +600,24 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 
 		this.GetQuery(VoiceStateQuery);
 	}
-}
+
+	public async GetDeletionLogByTimestamp(ts: number): Promise<channel_messages_deleted[]> {
+		const GetDeletionLogByTimestamp = `SELECT * FROM channel_messages_deleted WHERE deleted_at = "${ts}";`
+
+		return this.GetQuery(GetDeletionLogByTimestamp);
+	}
+
+}	
+
 
 
 export default DB;
+
+interface channel_messages_deleted {
+	message_id: string,
+	executor: string,
+	deleted_at: number
+}
 
 interface ChannelsInterface {
 	channel_id: string
