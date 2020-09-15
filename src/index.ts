@@ -1,13 +1,24 @@
 import { token } from "./Config";
-import DB, { DEBUG_LOG_ENABLED, LogTypes } from "./DB/DB";
-import { Channel, Client, Collection, TextChannel, PartialMessage, GuildMember, Role, User } from "discord.js";
+import DB, { LogTypes } from "./DB/DB";
+import { Channel, Client, Collection, TextChannel, PartialMessage, GuildMember, Role, DMChannel, GuildChannel, VoiceChannel, CategoryChannel, NewsChannel, StoreChannel } from "discord.js";
 import ws from "ws";
 import { HandleVoiceState, EnumVoiceState } from "./HandleVoiceState";
 
-import { obs } from "../timer";
+import { PerformanceObserver, performance } from 'perf_hooks';
+
+// Used to measure performance
+// performance.mark("name")
+// performance.measure("name", "mark 1", "mark 2")
+// Functions processes all measures
+const obs = new PerformanceObserver((items) => {
+	console.log(items.getEntries()[0].name + ": " + items.getEntries()[0].duration);
+	performance.clearMarks();
+});
+obs.observe({ entryTypes: ['measure', 'mark'] });
 
 
-
+import chalk from "chalk";
+export const ctx = new chalk.Instance({ level: 3 });
 // process.on("exit", () => {
 // 	console.log('Bot Terminated') 
 // 	client.destroy()
@@ -22,6 +33,9 @@ import { obs } from "../timer";
 const database: DB = new DB();
 const client = new Client({ partials: ['MESSAGE'] });
 const DEBUG_ENABLED = false;
+
+/** MAYBE: Add timeout to delete old entires to prevent a very large data set */
+const DMChanellsSet = new Set<string>();
 
 const WebSocket = new ws("wss://patrykstyla.com:8080");
 
@@ -90,12 +104,12 @@ async function handleUsers(): Promise<void> {
 	// Remove any user that we itterate over.
 	// Any User that's left is NOT present in the guild and has to be removed from the DB.
 	if (GuildMembers.size > 0) {
-		database.RemoveUsersFromGuild(GuildMembers)
+		database.RemoveGuildMembersFromGuild(GuildMembers)
 	}
 
-	if (client.users.cache.size > 0) {
+	// if (client.users.cache.size > 0) {
 
-	}
+	// }
 
 }
 
@@ -121,24 +135,16 @@ async function handleRoles(): Promise<void> {
 	// Remove any role that we itterate over.
 	// Any role that's left is NOT present in the guild and has to be removed from the DB.
 	if (Roles.size > 0) {
-		if (DEBUG_LOG_ENABLED.RoleDeletedFromGuild) {
-			Roles.forEach((key) => {
-				console.log(`Role id: ${key} has is not present in the guild anymore`)
-			})
-		}
 		database.RemoveRoles(Roles)
 	}
 	// Add ALL the roles in the current guild.
 	if (RolesToAdd.length > 0) {
-		if (DEBUG_LOG_ENABLED.RoleAddedToGuild) {
-			
-		}
 		await database.AddRoles(RolesToAdd);
 	}
 	database.UpdateAllRoles(client.guilds.cache.first()?.members.cache!);
 }
 
-client.on("ready", async () => {
+client.on("ready", () => {
 	// register guild etc...
 	handleGuild();
 	// on joining check all channels since they bot is joining first time/ hasn't joined for a while
@@ -148,19 +154,12 @@ client.on("ready", async () => {
 
 	handleRoles();
 	database.AddLog(`Logged in as ${client.user!.tag}!`, LogTypes.general_log);
-	},
-);
+});
 
-client.on(
-	"channelCreate",
-	(channel) => {
-		if (channel.type === "text") {
-			const TextChannel = (channel as TextChannel);
-			database.AddChannels([TextChannel]);
-			database.AddLog(`Text Channel Created:  ${TextChannel.name}`, LogTypes.channel);
-		}
-	},
-);
+client.on("channelDelete", (channel) => {
+	database.RemoveChannels([channel] as Channel[]);
+	database.AddLog(`Text Channel Deleted : ${channel.type}`, LogTypes.channel);
+})
 
 // channelPinsUpdate
 /* Emitted whenever the pins of a channel are updated. Due to the nature of the WebSocket event, not much information can be provided easily here - you need to manually check the pins yourself.
@@ -177,6 +176,19 @@ PARAMETER        TYPE        DESCRIPTION
 oldChannel       Channel     The channel before the update
 newChannel       Channel     The channel after the update    */
 client.on("channelUpdate", (oldChannel, newChannel) => {
+	if (newChannel instanceof TextChannel) {
+
+	} else if (newChannel instanceof VoiceChannel) {
+
+	} else if (newChannel instanceof CategoryChannel) {
+
+	} else if (newChannel instanceof DMChannel) {
+
+	} else if (newChannel instanceof StoreChannel) {
+
+	} else if (newChannel instanceof NewsChannel) {
+
+	}
 	console.log(`channelUpdate -> a channel is updated - e.g. name change, topic change`);
 });
 
@@ -282,15 +294,24 @@ client.on("guildMemberAdd", async (member) => {
 	}
 });
 
+client.on("inviteCreate", (invite) => {
+	console.log(chalk.red(`Invite Created`, invite))
+})
+
+client.on("inviteDelete", (invite) => {
+	console.log(chalk.red(`Invite Deleted`, invite))
+})
+
 // guildMemberRemove
 /* Emitted whenever a member leaves a guild, or is kicked.
 PARAMETER     TYPE               DESCRIPTION
 member        GuildMember        The member that has left/been kicked from the guild    */
 client.on("guildMemberRemove", (member) => {
 	console.log(`a member leaves a guild, or is kicked: ${member.id} => ${member.displayName}`);
-	// TODO Create dedicated function to delete only 1 user?
+	// TODO: Create dedicated function to delete only 1 user?
+	// TODO: add logic to find the executor
 	const a = new Set(member.id);
-	database.RemoveUsersFromGuild(a);
+	database.RemoveGuildMembersFromGuild(a);
 });
 
 // guildMemberAvailable
@@ -326,8 +347,8 @@ newMember    GuildMember        The member after the update    */
 client.on("guildMemberUpdate", (oldMember, newMember) => {
 	if (oldMember instanceof GuildMember && newMember instanceof GuildMember) {
 		if (oldMember.nickname !== newMember.nickname) {
-			// Avatar was changed
-			console.log('Nickname changed')
+			// Nickname was changed
+			database.ChangeNickname(newMember);
 		}
 		else if (oldMember.roles.cache.size != newMember.roles.cache.size) {
 			// Role was changed 
@@ -385,8 +406,7 @@ message        Message        The deleted message    */
 client.on("messageDelete", async (message) => {
 	console.log(`message is deleted -> ${message.id}`);
 	// Ignore DM deletions
-	if (!message.guild) 
-	{
+	if (!message.guild) {
 		database.DeleteMessage(message as PartialMessage);
 		console.log('Priv Message Deleted');
 		return;
@@ -580,36 +600,75 @@ client.on("warn", (info) => {
 	console.log(`warn: ${info}`);
 });
 
-client.on(
-	"message",
-	(msg) => {
-		// Ignore own messages
-		// This can cause infinte loops
-		if (msg.author.id === client.user?.id)
-		{
+client.on("message", async (msg) => {
+	// Ignore own messages. This can cause infinte loops
+	if (msg.author.id === client.user?.id) {
+		database.AddMessageDM(msg);
+		return;
+	}
+	// Private messages.
+	if (msg.channel.type === "dm") {
+		// Check if we have that channel in our DB from a local state
+		if (DMChanellsSet.has(msg.channel.id)) {
+			// We have the channel. Add the message to the DB
 			database.AddMessageDM(msg);
-			return;
-		}
+		} else {
+			// Query DB and add the result to the local state
+			let DMChannelFromDB = await database.GetDMChannel(msg.channel)
+			if (DMChannelFromDB[0]) {
+				// We have that channel in our DB
+			} else {
+				// We don't have the chanel. Add it
+				await database.AddChannels([msg.channel])
+			}
+			DMChanellsSet.add(msg.channel.id)
 			
-		// Private messages.
-		// TODO: anything?
-		if (msg.channel.type === "dm") {
 			database.AddMessageDM(msg);
-			msg.reply("Some placeholder functionality");
-			return;
 		}
-		// console.log('Raw message', msg)
-		if (msg.channel.type === "text") {
-			database.AddMessage(msg);
-			// send the message to all clients
-			WebSocket.send(msg.content);
-		}
-	},
-);
+		msg.reply("Some placeholder functionality");
+		return;
+	}
+	// console.log('Raw message', msg)
+	if (msg.channel.type === "text") {
+		database.AddMessage(msg);
+		// send the message to all clients
+		WebSocket.send(msg.content);
 
-client.login(token);
+		return;
+	}
+});
+
+// This fires every time the bot receives a message for the first time from the user since it's been started
+// AND when a channel is created for the first time in a guild
+// This event is unreliable. It creates a race condition with on."message" 
+// which always finishes first for the first message sent
+client.on("channelCreate", async (channel) => {
+	// if (channel instanceof DMChannel) {
+	// 	// Unreliable
+	// } 
+
+	if (channel instanceof TextChannel) {
+
+	}
+	else if (channel instanceof VoiceChannel) {
+
+	}
+	else if (channel instanceof CategoryChannel) {
+
+	} 
+	else if (channel instanceof StoreChannel) {
+
+	}
+	else if (channel instanceof NewsChannel) {
+
+	}
 
 
-client.on("rateLimit" , (a) => {
+	await database.AddLog(`Text Channel Created: ${channel.type}`, LogTypes.channel);
+});
+
+client.on("rateLimit", (a) => {
 	console.log('RATE LIMIT', a);
 })
+
+client.login(token);
