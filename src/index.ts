@@ -1,23 +1,25 @@
 import { token } from "./Config";
 import DB, { LogTypes } from "./DB/DB";
 import { Channel, Client, Collection, TextChannel, PartialMessage, GuildMember, Role, DMChannel, GuildChannel, VoiceChannel, CategoryChannel, NewsChannel, StoreChannel } from "discord.js";
-import ws from "ws";
 import { HandleVoiceState, EnumVoiceState } from "./HandleVoiceState";
 
 import { PerformanceObserver, performance } from 'perf_hooks';
+// import { obs } from "../timer"
+
+import chalk from "chalk";
+import { WebSocket } from "./WebSocketClient";
 
 // Used to measure performance
 // performance.mark("name")
 // performance.measure("name", "mark 1", "mark 2")
 // Functions processes all measures
-const obs = new PerformanceObserver((items) => {
+
+export const obs = new PerformanceObserver((items) => {
 	console.log(items.getEntries()[0].name + ": " + items.getEntries()[0].duration);
 	performance.clearMarks();
 });
-obs.observe({ entryTypes: ['measure', 'mark'] });
+obs.observe({ entryTypes: ['measure'] });
 
-
-import chalk from "chalk";
 export const ctx = new chalk.Instance({ level: 3 });
 // process.on("exit", () => {
 // 	console.log('Bot Terminated') 
@@ -37,19 +39,9 @@ const DEBUG_ENABLED = false;
 /** MAYBE: Add timeout to delete old entires to prevent a very large data set */
 const DMChanellsSet = new Set<string>();
 
-const WebSocket = new ws("wss://patrykstyla.com:8080");
-
-WebSocket.on(
-	"open",
-	() => {
-		WebSocket.send("Bot socket is ready");
-	},
-);
-
 // ws.on('message', function incoming(data) {
 //     console.log('Bot received: %s', data);
 // });
-
 
 async function handleGuild(): Promise<void> {
 	const GuildKey = client.guilds.cache.firstKey();
@@ -72,11 +64,18 @@ async function handleChannels(): Promise<void> {
 			// We don't have that channel added. Add it
 			ChannelsToAdd.push(element);
 		}
+
+		channels.delete(key)
 	});
 	if (ChannelsToAdd.length > 0) {
 		database.AddChannels(ChannelsToAdd);
 		console.log(`Added new channels`)
 	}
+	// Channels that are present in our DB but not in the chanel
+	if (channels.size > 0) {
+		database.RemoveChannels(channels)
+	}
+
 	// Update ALL channels when connecting to a server
 	if (client.channels.cache.size > 0) {
 		database.UpdateAllChannels(client.channels);
@@ -91,11 +90,11 @@ async function handleUsers(): Promise<void> {
 		if (!GuildMembers.has(key)) {
 			// We don't have that user. Add it
 			UsersToAdd.push(element);
-			GuildMembers.delete(key)
 		}
 		else {
-			GuildMembers.delete(key)
 		}
+
+		GuildMembers.delete(key)
 	});
 	if (UsersToAdd.length > 0) {
 		await database.AddUsers(UsersToAdd);
@@ -125,12 +124,12 @@ async function handleRoles(): Promise<void> {
 		if (!Roles.has(key)) {
 			// We DON'T have that role in our db
 			RolesToAdd.push(element);
-			Roles.delete(key)
 		}
 		else {
 			// We HAVE that role in our db
-			Roles.delete(key)
 		}
+
+		Roles.delete(key)
 	});
 	// Remove any role that we itterate over.
 	// Any role that's left is NOT present in the guild and has to be removed from the DB.
@@ -144,22 +143,95 @@ async function handleRoles(): Promise<void> {
 	database.UpdateAllRoles(client.guilds.cache.first()?.members.cache!);
 }
 
-client.on("ready", () => {
+client.on("ready", async () => {
 	// register guild etc...
 	handleGuild();
 	// on joining check all channels since they bot is joining first time/ hasn't joined for a while
 	handleChannels();
 	// Check all users
 	handleUsers();
-
+	
 	handleRoles();
 	database.AddLog(`Logged in as ${client.user!.tag}!`, LogTypes.general_log);
 });
 
 client.on("channelDelete", (channel) => {
-	database.RemoveChannels([channel] as Channel[]);
+	database.RemoveChannel(channel);
 	database.AddLog(`Text Channel Deleted : ${channel.type}`, LogTypes.channel);
 })
+
+// This fires every time the bot receives a message for the first time from the user since it's been started
+// AND when a channel is created for the first time in a guild
+// This event is unreliable with a DM channel. It creates a race condition with on."message" 
+// which always finishes first for the first message sent
+client.on("channelCreate", async (channel) => {
+	// if (channel instanceof DMChannel) {
+	// 	// Unreliable
+	// } 
+	// TODO: fix checking for channel type here and in the db function
+	if (channel instanceof TextChannel) {
+		database.AddChannels([channel]);
+	}
+	else if (channel instanceof VoiceChannel) {
+		database.AddChannels([channel]);
+	}
+	else if (channel instanceof CategoryChannel) {
+		database.AddChannels([channel]);
+	}
+	else if (channel instanceof StoreChannel) {
+		database.AddChannels([channel]);
+	}
+	else if (channel instanceof NewsChannel) {
+		database.AddChannels([channel]);
+	}
+
+
+	await database.AddLog(`Text Channel Created: ${channel.type}`, LogTypes.channel);
+});
+
+// channelUpdate
+/* Emitted whenever a channel is updated - e.g. name change, topic change.
+PARAMETER        TYPE        DESCRIPTION
+oldChannel       Channel     The channel before the update
+newChannel       Channel     The channel after the update    */
+client.on("channelUpdate", (oldChannel, newChannel) => {
+	if (newChannel instanceof TextChannel && oldChannel instanceof TextChannel) {
+		if (oldChannel.rawPosition !== newChannel.rawPosition) {
+			// Channel was moved in the guild hierarchy
+			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition);
+		}
+
+	} else if (newChannel instanceof VoiceChannel && oldChannel instanceof VoiceChannel) {
+		if (oldChannel.rawPosition !== newChannel.rawPosition) {
+			// Channel was moved in the guild hierarchy
+			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition);
+		}
+
+	} else if (newChannel instanceof CategoryChannel && oldChannel instanceof CategoryChannel) {
+		if (oldChannel.rawPosition !== newChannel.rawPosition) {
+			// Channel was moved in the guild hierarchy
+			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition);
+		}
+
+	} else if (newChannel instanceof DMChannel && oldChannel instanceof DMChannel) {
+		database.AddLog(`DM channel update + ${newChannel.toJSON()}`, LogTypes.channel)
+
+	} else if (newChannel instanceof StoreChannel && oldChannel instanceof StoreChannel) {
+		if (oldChannel.rawPosition !== newChannel.rawPosition) {
+			// Channel was moved in the guild hierarchy
+			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition);
+		}
+
+	} else if (newChannel instanceof NewsChannel && oldChannel instanceof NewsChannel) {
+		if (oldChannel.rawPosition !== newChannel.rawPosition) {
+			// Channel was moved in the guild hierarchy
+			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition);
+		}
+
+	} else {
+		database.AddLog("unkown channel at channelUpdate", LogTypes.guild)
+	}
+});
 
 // channelPinsUpdate
 /* Emitted whenever the pins of a channel are updated. Due to the nature of the WebSocket event, not much information can be provided easily here - you need to manually check the pins yourself.
@@ -170,27 +242,7 @@ client.on("channelPinsUpdate", (channel, time) => {
 	console.log(`channelPinsUpdate: ${channel}:${time}`);
 });
 
-// channelUpdate
-/* Emitted whenever a channel is updated - e.g. name change, topic change.
-PARAMETER        TYPE        DESCRIPTION
-oldChannel       Channel     The channel before the update
-newChannel       Channel     The channel after the update    */
-client.on("channelUpdate", (oldChannel, newChannel) => {
-	if (newChannel instanceof TextChannel) {
 
-	} else if (newChannel instanceof VoiceChannel) {
-
-	} else if (newChannel instanceof CategoryChannel) {
-
-	} else if (newChannel instanceof DMChannel) {
-
-	} else if (newChannel instanceof StoreChannel) {
-
-	} else if (newChannel instanceof NewsChannel) {
-
-	}
-	console.log(`channelUpdate -> a channel is updated - e.g. name change, topic change`);
-});
 
 // debug
 /* Emitted for general debugging information.
@@ -339,6 +391,7 @@ speaking      boolean             Whether or not the member is speaking    */
 client.on("guildMemberSpeaking", (member, speaking) => {
 	console.log(`a guild member starts/stops speaking: ${member.id}`);
 });
+
 // guildMemberUpdate
 /* Emitted whenever a guild member changes - i.e. new role, removed role, nickname.
 PARAMETER    TYPE               DESCRIPTION
@@ -622,7 +675,7 @@ client.on("message", async (msg) => {
 				await database.AddChannels([msg.channel])
 			}
 			DMChanellsSet.add(msg.channel.id)
-			
+
 			database.AddMessageDM(msg);
 		}
 		msg.reply("Some placeholder functionality");
@@ -638,34 +691,6 @@ client.on("message", async (msg) => {
 	}
 });
 
-// This fires every time the bot receives a message for the first time from the user since it's been started
-// AND when a channel is created for the first time in a guild
-// This event is unreliable. It creates a race condition with on."message" 
-// which always finishes first for the first message sent
-client.on("channelCreate", async (channel) => {
-	// if (channel instanceof DMChannel) {
-	// 	// Unreliable
-	// } 
-
-	if (channel instanceof TextChannel) {
-
-	}
-	else if (channel instanceof VoiceChannel) {
-
-	}
-	else if (channel instanceof CategoryChannel) {
-
-	} 
-	else if (channel instanceof StoreChannel) {
-
-	}
-	else if (channel instanceof NewsChannel) {
-
-	}
-
-
-	await database.AddLog(`Text Channel Created: ${channel.type}`, LogTypes.channel);
-});
 
 client.on("rateLimit", (a) => {
 	console.log('RATE LIMIT', a);
