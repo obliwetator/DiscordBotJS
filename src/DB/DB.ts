@@ -15,8 +15,10 @@ import {
 } from "discord.js";
 import { EnumVoiceState } from "../HandleVoiceState";
 
-// import { performance, PerformanceObserver } from 'perf_hooks';
-// import util from 'util';
+import { PrismaClient } from "@prisma/client"
+import { performance, PerformanceObserver } from 'perf_hooks';
+
+import { obs } from "../../timer"
 import chalk from "chalk";
 import { ctx } from "..";
 
@@ -39,6 +41,9 @@ export const DEBUG_LOG_ENABLED = {
 	DeleteMessageBulkExecutor: false,
 	RoleRemovedFromMember: false,
 	RoleAddedToMember: false,
+	ChannelUpdate: {
+		position: false
+	}
 }
 
 class DB {
@@ -68,6 +73,7 @@ class DB {
 		this.GetQuery(AddRole);
 	}
 	public pool: Pool;
+	private prisma: PrismaClient
 	GuildId: string;
 	constructor() {
 		this.pool = createPool({
@@ -81,6 +87,7 @@ class DB {
 			debug: false,
 		});
 		this.GuildId = "";
+		this.prisma = new PrismaClient()
 	}
 
 	// private SetQuery<T>(query: string, values: T) {
@@ -110,18 +117,87 @@ class DB {
 		});
 	}
 
-	/**
-	 * The channel is marked as deleted but will stay in the DB to link to any messages in that channel 
-	 * as well which guild it belonged to originally
-	 */
-	public RemoveChannels(channels: Channel[]) {
-		let RemoveChannelQuery = "UPDATE channels SET is_deleted = '1', position = '-1' WHERE IN ("
-		channels.forEach((element) => {
-			RemoveChannelQuery += element.id + ",";
-		})
+	public async dummy(arg0:Channel) {
 
-		RemoveChannelQuery = RemoveChannelQuery.slice(0, -1) + ");";
-		this.GetQuery(RemoveChannelQuery);
+		const ammount = 10_000
+		performance.mark("a")
+		for (let index = 0; index < ammount; index++) {	
+			await this.GetQuery(`SELECT id FROM channels`);
+		}
+		performance.mark("b")
+		performance.measure("a -> b", "a", "b")
+
+
+		performance.mark("c")
+		for (let index = 0; index < ammount; index++) {	
+			await this.prisma.channels.findMany({select:{id:true}})
+		}
+		performance.mark("d")
+		performance.measure("c -> d" ,"c", "d")
+
+	}
+
+	/**
+	* The channel is marked as deleted but will stay in the DB to link to any messages in that channel 
+	* as well which guild it belonged to originally
+	*/
+	public async RemoveChannels(channels: Set<string>) {
+		// TODO: try to fetch some messages from discord as there may be gaps in our DB
+		let messagesCount:number
+		channels.forEach(async (channel) => {
+			messagesCount = await this.prisma.channel_messages.count({
+				where: {
+					channel_id: channel
+				}
+			})
+			if (messagesCount === 0) {
+				// There are no messages in the channel. We can completly delete it
+				// FIX: prisma2 doesn't support CASCADE deletes if the FK is non-nullable
+				await this.prisma.$executeRaw(`DELETE FROM channels WHERE id = '${channel}'`)
+			} else {
+				// Channel has messages. Mark as deleted
+				await this.prisma.channels.update({
+					where: {
+						id: channel
+					}, 
+					data: {
+						is_deleted: true,
+						position: -1
+					}
+				})
+			}
+		})
+	}
+
+	/**
+	* The channel is marked as deleted but will stay in the DB to link to any messages in that channel 
+	* as well which guild it belonged to originally
+	*/
+	public async RemoveChannel(channel: Channel) {
+		// TODO: try to fetch some messages from discord as there may be gaps in our DB
+		const count = await this.prisma.channel_messages.count({
+			where: {
+				channel_id: channel.id
+			}
+		})
+		// TODO: Handle logging the deletion
+		if (count === 0) {
+			// There are no messages in the channel. We can completly delete it
+			// FIX: prisma2 doesn't support CASCADE deletes if the FK is non-nullable
+			await this.prisma.$executeRaw(`DELETE FROM channels WHERE id = '${channel}'`)
+			
+		} else {
+			// > 0. mark the channel as deleted
+			await this.prisma.channels.update({
+				where: {
+					id: channel.id
+				}, 
+				data: {
+					is_deleted: true,
+					position: -1
+				}
+			})
+		}
 	}
 
 	public async AddLog(value: string, type: LogTypes, severity: SeverityEnum = SeverityEnum.default) {
@@ -191,26 +267,26 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 
 		channels.forEach((element) => {
 			if (element instanceof TextChannel) {
-				query += `('${element.id}', 'NULL', '${element.name}', '${element.type}', '${element.position}'),`;
+				query += `('${element.id}', NULL, '${element.name}', '${element.type}', '${element.position}'),`;
 				query2 += `('${this.GuildId}', '${element.id}'),`;
 			}
 			else if (element instanceof VoiceChannel) {
-				query += `('${element.id}', 'NULL', '${element.name}', '${element.type}', '${element.position}'),`;
+				query += `('${element.id}', NULL, '${element.name}', '${element.type}', '${element.position}'),`;
 				query2 += `('${this.GuildId}', '${element.id}'),`;
 			}
 			else if (element instanceof CategoryChannel) {
-				query += `('${element.id}', 'NULL', '${element.name}', '${element.type}', '${element.position}'),`;
+				query += `('${element.id}', NULL, '${element.name}', '${element.type}', '${element.position}'),`;
 				query2 += `('${this.GuildId}', '${element.id}'),`;
 			} 
 			else if (element instanceof DMChannel) {
 				query += `('${element.id}', '${element.recipient.id}', NULL, '${element.type}', NULL),`;
 			}
 			else if (element instanceof StoreChannel) {
-				query += `('${element.id}', 'NULL', '${element.name}', '${element.type}', '${element.position}'),`;
+				query += `('${element.id}', NULL, '${element.name}', '${element.type}', '${element.position}'),`;
 				query2 += `('${this.GuildId}', '${element.id}'),`;
 			}
 			else if (element instanceof NewsChannel) {
-				query += `('${element.id}', 'NULL', '${element.name}', '${element.type}', '${element.position}'),`;
+				query += `('${element.id}', NULL, '${element.name}', '${element.type}', '${element.position}'),`;
 				query2 += `('${this.GuildId}', '${element.id}'),`;
 			} else {
 				// Either GroupDM channel or unkown
@@ -669,6 +745,22 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 		}
 
 		this.GetQuery(UpdateGuildmemberNickname);
+	}
+
+	public async UpdateChannelPosition(channelId: string, newPos: number) {
+		if (DEBUG_LOG_ENABLED.ChannelUpdate.position) {
+			console.log(`New Channel Position => ${newPos} for channel: ${channelId}`)
+			
+		}
+
+		await this.prisma.channels.update({
+			where:{
+				id: channelId
+			},
+			data:{
+				position: newPos
+			}
+		})
 	}
 
 	public GetDMChannel(channel: DMChannel): Promise<ChannelsInterface[]> {
