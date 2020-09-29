@@ -11,7 +11,7 @@ import {
 	VoiceChannel,
 	GuildMember,
 	PartialMessage,
-	Role, DMChannel, StoreChannel, NewsChannel
+	Role, DMChannel, StoreChannel, NewsChannel, Invite, PermissionOverwrites
 } from "discord.js";
 import { EnumVoiceState } from "../HandleVoiceState";
 
@@ -21,6 +21,8 @@ import { performance, PerformanceObserver } from 'perf_hooks';
 import { obs } from "../../timer"
 import chalk from "chalk";
 import { ctx } from "..";
+
+obs;
 
 export const DEBUG_LOG_ENABLED = {
 	AddLogs: true,
@@ -41,12 +43,214 @@ export const DEBUG_LOG_ENABLED = {
 	DeleteMessageBulkExecutor: false,
 	RoleRemovedFromMember: false,
 	RoleAddedToMember: false,
+	UpdateGuildName: false,
 	ChannelUpdate: {
-		position: false
+		position: false,
+		name: false,
+		nsfw: false,
+		rateLimit: false,
+		topic: false,
+		permissions: false
 	}
 }
 
 class DB {
+	public async AddUpdatePermissions(PermissionsToAddUpdate: Map<string, ChannelRolePermissions[]>) {
+		let query = "INSERT INTO channel_permissions (channel_id, role_id, allow_bitfield, deny_bitfield) VALUES"
+		let dup = "ON DUPLICATE KEY UPDATE allow_bitfield = VALUES(allow_bitfield) , deny_bitfield = VALUES(deny_bitfield)"
+
+		PermissionsToAddUpdate.forEach((permissions) => {
+			permissions.forEach((element) => {
+				query += `('${element.channel_id}', '${element.role_id}', '${element.allow_bitfield}', '${element.deny_bitfield}'),`
+			})
+		})
+
+		query = `${query.slice(0, -1)} `;
+
+		this.GetQuery(query + dup)
+	}
+	public async RemovePermissionFromChannel(PermissionsToRemove: {channel_id: string, role_id: string}[]) {
+		let query = "DELETE FROM channel_permissions WHERE (channel_id, role_id) IN ("
+		// TODO: Log the deletion of a Permission
+		PermissionsToRemove.forEach((element, key) => {
+			query += `('${element.channel_id}', '${element.role_id}'),`
+		})
+
+		query = `${query.slice(0, -1)})`;
+
+		this.GetQuery(query);
+	}
+	public async GetChannelPermissions() {
+		// Very inneficient query
+		// const a = await this.prisma.channel_permissions.findMany({
+		// 	include:{
+		// 		channels:{
+		// 			include:{
+		// 				guild_to_channel:{
+		// 					where:{
+		// 						guild_id: this.GuildId
+		// 					}
+		// 				}
+		// 			}
+		// 		}
+		// 	}
+		// })
+
+		const a = await this.GetQuery(`SELECT channel_permissions.* FROM channel_permissions LEFT JOIN channels ON channel_permissions.channel_id = channels.channel_id LEFT JOIN guild_to_channel ON guild_to_channel.channel_id = channels.channel_id WHERE guild_to_channel.guild_id = '${this.GuildId}'`) as ChannelRolePermissions[]
+
+		return a;
+	}
+	public async AddDMChannel(channel: DMChannel) {
+		await this.prisma.channels.create({
+			data: {
+				channel_id: channel.id,
+				types: "dm",
+				channel_dm: {
+					create: {
+						recepient: channel.recipient.id
+					}
+				}
+			}
+		})
+	}
+	public async UpdateTextChannelNsfw(channelId: string, nsfw: boolean) {
+		if (DEBUG_LOG_ENABLED.ChannelUpdate.nsfw) {
+			console.log(`Channel id: ${channelId} has set nsfw to ${nsfw}`)
+		}
+
+		await this.prisma.channel_text.update({ where: { channel_id: channelId }, data: { nsfw: nsfw } })
+	}
+	public async UpdateTextChannelRateLimit(channelId: string, rateLimitPerUser: number) {
+		if (DEBUG_LOG_ENABLED.ChannelUpdate.rateLimit) {
+			console.log(`Channel id: ${channelId} has set ratelimit to ${rateLimitPerUser}`)
+		}
+
+		await this.prisma.channel_text.update({ where: { channel_id: channelId }, data: { rate_limit_per_user: rateLimitPerUser } })
+	}
+	public async UpdateTextChannelTopic(channelId: string, topic: string | null) {
+		if (DEBUG_LOG_ENABLED.ChannelUpdate.topic) {
+			console.log(`Channel id: ${channelId} has set topic to ${topic}`)
+		}
+
+		await this.prisma.channel_text.update({ where: { channel_id: channelId }, data: { topic: topic } })
+	}
+	public async UpdateChannelPermissions(channelId: string, permissionOverwritesOld: Collection<string, PermissionOverwrites>, permissionOverwritesNew: Collection<string, PermissionOverwrites>) {
+		if (DEBUG_LOG_ENABLED.ChannelUpdate.permissions) {
+			permissionOverwritesNew.forEach((element, key) => {
+				console.log(`Permission updated for channel id: ${channelId} for the permission: ${key}`)
+			})
+		}
+
+		if (permissionOverwritesOld.size > permissionOverwritesNew.size) {
+			// Role was removed from channel 
+			permissionOverwritesOld.forEach(async (element, key) => {
+				if (permissionOverwritesNew.has(key)) {
+					// Permissions match do nothing
+				} else {
+					// prisma2 bugs out when deleting a entry with 2 unique collumns
+					// 
+					await this.RemovePermissionFromChannel([{channel_id:channelId, role_id: key}])
+					return;
+				}
+			})
+		} else if (permissionOverwritesOld.size < permissionOverwritesNew.size) {
+			// Role was added
+			console.log('Role Added')
+			permissionOverwritesNew.forEach(async (element, key) => {
+				if (!permissionOverwritesOld.has(key)) {
+					// permissions don't match add that permission
+					await this.prisma.channel_permissions.create({
+						data: {
+							channels: { connect: { channel_id: channelId } },
+							allow_bitfield: element.allow.bitfield,
+							deny_bitfield: element.deny.bitfield,
+							role_id: key
+						}
+					})
+					return;
+				}
+
+			})
+		} else {
+			// a permission for a role was updated
+			permissionOverwritesNew.forEach(async (element, key) => {
+				if (element.deny.bitfield !== permissionOverwritesOld.get(key)?.deny.bitfield) {
+					// Deny permission changed
+					await this.GetQuery(`UPDATE channel_permissions SET deny_bitfield = '${element.deny.bitfield}' WHERE channel_id = '${channelId}' AND role_id = '${element.id}'`)
+
+					return;
+				} else if (element.allow.bitfield !== permissionOverwritesOld.get(key)?.allow.bitfield) {
+					// Allow permissions changed
+					await this.GetQuery(`UPDATE channel_permissions SET allow_bitfield = '${element.allow.bitfield}' WHERE channel_id = '${channelId}' AND role_id = '${element.id}'`)
+
+					return;
+				}
+			});
+		}
+
+		return;
+	}
+	public async UpdateGuildName(id: string, name: string) {
+		if (DEBUG_LOG_ENABLED.UpdateGuildName) {
+			console.log(`Guild id: ${id} Changed treir name to ${name}`)
+		}
+		await this.prisma.guilds.update({
+			where: {
+				id: id
+			},
+			data: {
+				name: name
+			}
+		})
+	}
+	// invite_id: invite.code,
+	// channel_id: invite.channel.id,
+	// created_at: invite.createdTimestamp!,
+	// inviter_id: invite.inviter?.id,
+	// max_age: invite.maxAge,
+	// max_uses: invite.maxUses,
+	// uses: invite.uses,
+	// temporary: invite.temporary,
+	// deleted: false
+	public async AddInvite(invite: Invite) {
+		await this.prisma.channel_invites.create({
+			data: {
+				invite_id: invite.code,
+				channels: { connect: { channel_id: invite.channel.id } },
+				created_at: invite.createdTimestamp!,
+				guild_user: { connect: { user_id: invite.inviter?.id } },
+				max_age: invite.maxAge,
+				max_uses: invite.maxUses,
+				uses: invite.uses,
+				temporary: invite.temporary,
+				deleted: false
+			}
+		})
+	}
+	/** 
+	 * Mark the invite as deleted
+	*/
+	public async RemoveInvite(invite: Invite) {
+		await this.prisma.channel_invites.update({
+			where: {
+				invite_id: invite.code
+			},
+			data: {
+				deleted: true
+			}
+		})
+	}
+
+	public async ExpireInvite(invite: Invite) {
+		await this.prisma.channel_invites.update({
+			where: {
+				invite_id: invite.code
+			},
+			data: {
+				expired: true
+			}
+		})
+	}
 
 	/**
 	 * Remove a single role for a single user
@@ -77,7 +281,7 @@ class DB {
 	GuildId: string;
 	constructor() {
 		this.pool = createPool({
-			connectionLimit: 10,
+			connectionLimit: 100,
 			host,
 			user: username,
 			password,
@@ -108,7 +312,7 @@ class DB {
 
 	private async GetQueryArg(query: string, arg: Array<unknown>): Promise<[]> {
 		return new Promise((resolve, reject) => {
-			this.pool.query(query,arg, (error, results) => {
+			this.pool.query(query, arg, (error, results) => {
 				if (error) {
 					return reject(error);
 				}
@@ -117,23 +321,61 @@ class DB {
 		});
 	}
 
-	public async dummy(arg0:Channel) {
+	public async dummy(arg0: Channel) {
 
-		const ammount = 10_000
+
+		const a = await this.GetQuery(`CALL find_channel(${arg0.id})`);
+
+		const ammount = 10_0000
 		performance.mark("a")
-		for (let index = 0; index < ammount; index++) {	
-			await this.GetQuery(`SELECT id FROM channels`);
+		for (let index = 0; index < ammount; index++) {
+			//this.GetQuery(`SELECT * FROM channels`);
 		}
 		performance.mark("b")
-		performance.measure("a -> b", "a", "b")
+		performance.measure("RAW SQL", "a", "b")
 
 
 		performance.mark("c")
-		for (let index = 0; index < ammount; index++) {	
-			await this.prisma.channels.findMany({select:{id:true}})
+		for (let index = 0; index < ammount; index++) {
+			//this.prisma.channels.findMany()
 		}
 		performance.mark("d")
-		performance.measure("c -> d" ,"c", "d")
+		performance.measure("prisma", "c", "d")
+
+		performance.mark("e")
+		for (let index = 0; index < ammount; index++) {
+			// this.prisma.$executeRaw(`SELECT * FROM channels`)
+		}
+		performance.mark("f")
+		performance.measure("prisma RAW", "e", "f")
+
+		performance.mark("g")
+		for (let index = 0; index < ammount; index++) {
+			// 25 times slower than manual joins
+			// await this.prisma.channel_permissions.findMany({
+			// 	include: {
+			// 		channels: {
+			// 			include: {
+			// 				guild_to_channel: {
+			// 					where: {
+			// 						guild_id: this.GuildId
+			// 					}
+			// 				}
+			// 			}
+			// 		}
+			// 	}
+			// })
+		}
+		performance.mark("h")
+		performance.measure("Prisma 2 joins", "g", "h")
+
+		performance.mark("k")
+		for (let index = 0; index < ammount; index++) {
+			// await this.GetQuery(`SELECT channel_permissions.* FROM channel_permissions LEFT JOIN channels ON channel_permissions.channel_id = channels.channel_id LEFT JOIN guild_to_channel ON guild_to_channel.channel_id = channels.channel_id WHERE guild_to_channel.guild_id = '${this.GuildId}'`) as ChannelRolePermissions[]
+			performance.mark("j")
+		}
+		performance.measure("RAW 2 joins", "k", "j")
+
 
 	}
 
@@ -143,7 +385,7 @@ class DB {
 	*/
 	public async RemoveChannels(channels: Set<string>) {
 		// TODO: try to fetch some messages from discord as there may be gaps in our DB
-		let messagesCount:number
+		let messagesCount: number
 		channels.forEach(async (channel) => {
 			messagesCount = await this.prisma.channel_messages.count({
 				where: {
@@ -153,17 +395,17 @@ class DB {
 			if (messagesCount === 0) {
 				// There are no messages in the channel. We can completly delete it
 				// FIX: prisma2 doesn't support CASCADE deletes if the FK is non-nullable
-				await this.prisma.$executeRaw(`DELETE FROM channels WHERE id = '${channel}'`)
+				await this.prisma.$executeRaw(`DELETE FROM channels WHERE channel_id = '${channel}'`)
 			} else {
 				// Channel has messages. Mark as deleted
 				await this.prisma.channels.update({
 					where: {
-						id: channel
-					}, 
+						"channel_id": channel,
+					},
 					data: {
-						is_deleted: true,
-						position: -1
+						is_deleted: true
 					}
+
 				})
 			}
 		})
@@ -184,17 +426,17 @@ class DB {
 		if (count === 0) {
 			// There are no messages in the channel. We can completly delete it
 			// FIX: prisma2 doesn't support CASCADE deletes if the FK is non-nullable
-			await this.prisma.$executeRaw(`DELETE FROM channels WHERE id = '${channel}'`)
-			
+			await this.prisma.$executeRaw(`DELETE FROM channels WHERE channel_id = '${channel}'`)
+
 		} else {
 			// > 0. mark the channel as deleted
 			await this.prisma.channels.update({
 				where: {
-					id: channel.id
-				}, 
+					channel_id: channel.id
+				},
 				data: {
 					is_deleted: true,
-					position: -1
+					//position: -1
 				}
 			})
 		}
@@ -203,7 +445,7 @@ class DB {
 	public async AddLog(value: string, type: LogTypes, severity: SeverityEnum = SeverityEnum.default) {
 		if (DEBUG_LOG_ENABLED.AddLogs) {
 			if (severity === SeverityEnum.default) {
-				console.log(ctx .blue(`${value}`));
+				console.log(ctx.blue(`${value}`));
 			} else if (severity === SeverityEnum.info) {
 				console.log(ctx.green(`${value}`));
 			} else if (severity === SeverityEnum.warn) {
@@ -239,7 +481,7 @@ INSERT IGNORE INTO users (id, username, discriminator, bot)\
 VALUES ('${message.author.id}', '${message.author.username}', '${message.author.discriminator}', ${message.author.bot ? 1 : 0});\
 INSERT INTO channel_messages (id, content, author, type, embeds, attachments, channel_id)\
 VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.author.id}', '${message.type}', ${hasEmbed ? `${message.id}` : "NULL"}, ${hasAttachment ? `${message.attachments.first()?.id}` : "NULL"}, '${message.channel.id}');`)
-;
+			;
 	}
 	/**
 	 * Every DM is unique between the bot and the recepient.\
@@ -260,34 +502,59 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 				console.log(`Channel id: ${value.id} added`)
 			})
 		}
-		//                                     NULL       NULL        NULL
-		let query = "INSERT INTO channels (id, recepient, name, type, position) VALUES";
-		let query2 = "INSERT INTO guild_to_channel (guild_id, channel_id) VALUES";
-		const query2size = query2.length;
+
+		let ChannelQuery = "INSERT INTO channels (channel_id, types) VALUES"
+		let GuildToChannelQuery = "INSERT INTO guild_to_channel (guild_id, channel_id) VALUES";
+		let ChannelPermissionsQuery = "INSERT INTO channel_permissions (channel_id, role_id, allow_bitfield, deny_bitfield) VALUES"
+		let InsertChannelQuery = "";
 
 		channels.forEach((element) => {
+			// add the channel
+			ChannelQuery += `('${element.id}', '${element.type}'),`
+
 			if (element instanceof TextChannel) {
-				query += `('${element.id}', NULL, '${element.name}', '${element.type}', '${element.position}'),`;
-				query2 += `('${this.GuildId}', '${element.id}'),`;
+				element.permissionOverwrites.forEach((permission) => {
+					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
+				})
+
+				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
+				InsertChannelQuery += `INSERT INTO channel_text (channel_id, name, position, topic, nsfw, rate_limit_per_user) VALUES ('${element.id}', '${element.name}', '${element.position}', '${element.topic}', '${element.nsfw ? 1 : 0}', '${element.rateLimitPerUser}');`
+
 			}
 			else if (element instanceof VoiceChannel) {
-				query += `('${element.id}', NULL, '${element.name}', '${element.type}', '${element.position}'),`;
-				query2 += `('${this.GuildId}', '${element.id}'),`;
+				element.permissionOverwrites.forEach((permission) => {
+					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
+				})
+
+				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
+				InsertChannelQuery += `INSERT INTO channel_voice (channel_id, name, position) VALUES ('${element.id}', '${element.name}', '${element.position}');`
 			}
 			else if (element instanceof CategoryChannel) {
-				query += `('${element.id}', NULL, '${element.name}', '${element.type}', '${element.position}'),`;
-				query2 += `('${this.GuildId}', '${element.id}'),`;
-			} 
+				element.permissionOverwrites.forEach((permission) => {
+					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
+				})
+
+				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
+				InsertChannelQuery += `INSERT INTO channel_category (channel_id, position, name) VALUES ('${element.id}', '${element.position}', '${element.name}');`
+			}
 			else if (element instanceof DMChannel) {
-				query += `('${element.id}', '${element.recipient.id}', NULL, '${element.type}', NULL),`;
+				return;
 			}
 			else if (element instanceof StoreChannel) {
-				query += `('${element.id}', NULL, '${element.name}', '${element.type}', '${element.position}'),`;
-				query2 += `('${this.GuildId}', '${element.id}'),`;
+				element.permissionOverwrites.forEach((permission) => {
+					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
+				})
+
+				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
+				InsertChannelQuery += `INSERT INTO channel_store (channel_id, name, position) VALUES ('${element.id}', '${element.name}', '${element.position}');`
 			}
 			else if (element instanceof NewsChannel) {
-				query += `('${element.id}', NULL, '${element.name}', '${element.type}', '${element.position}'),`;
-				query2 += `('${this.GuildId}', '${element.id}'),`;
+				element.permissionOverwrites.forEach((permission) => {
+					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
+				})
+
+				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
+				InsertChannelQuery += `INSERT INTO channel_news (channel_id, name, position) VALUES ('${element.id}', '${element.name}', '${element.position}');`
 			} else {
 				// Either GroupDM channel or unkown
 				console.log(chalk.red(''))
@@ -295,16 +562,15 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 			}
 		});
 		// query was did not change
-		if (query2size === query2.length) {
-			query2 = "";
-		} else {
-			query2 = `${query2.slice(0, -1)};`;
-		}
-		// replace last , with ;
-		query = `${query.slice(0, -1)};`;
 
+		ChannelQuery = `${ChannelQuery.slice(0, -1)};`;
+		ChannelPermissionsQuery = `${ChannelPermissionsQuery.slice(0, -1)};`;
+		GuildToChannelQuery = `${GuildToChannelQuery.slice(0, -1)};`;
 
-		await this.GetQuery(`${query} ${query2}`);
+		await this.GetQuery(ChannelQuery);
+		await this.GetQuery(ChannelPermissionsQuery)
+		await this.GetQuery(GuildToChannelQuery)
+		await this.GetQuery(InsertChannelQuery)
 
 	}
 	/**
@@ -428,7 +694,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 				element.forEach((value) => {
 					console.log(`Role id: ${value}`)
 				})
-				
+
 			})
 		}
 		let AddUsersRoles = "INSERT INTO guild_users_to_roles (user_id, role_id) VALUES"
@@ -474,12 +740,10 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 		}
 
 		const ChannelMap = new Set<string>();
-
+		// Get all non deleted channels
 		const Channels = (await this.GetQuery(
-			`SELECT guild_to_channel.channel_id 
-			FROM guild_to_channel 
-			WHERE guild_to_channel.guild_id = '${GuildId}'
-			`,
+			`SELECT channels.channel_id FROM channels LEFT JOIN guild_to_channel ON guild_to_channel.channel_id = channels.channel_id
+			WHERE guild_to_channel.guild_id = '${GuildId}' AND is_deleted = 0`,
 		) as Array<GuildToChannelsInterface>);
 
 		Channels.forEach((element) => {
@@ -523,7 +787,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 	/**
 	 * Add an existing user as a guild user
 	 */
-	AddGuildMembers(member: Array<GuildMember>) {
+	public async AddGuildMembers(member: Array<GuildMember>) {
 		if (DEBUG_LOG_ENABLED.AddGuildMember) {
 			member.forEach((element) => {
 				console.log(`Guild Member id: ${element.id} added`)
@@ -531,19 +795,14 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 		}
 		// Add GuildMembers
 		let InsertGuildUser = "INSERT INTO guild_user (user_id, nickname) VALUES";
-		let InsertGuildUserRoles = "INSERT INTO guild_users_to_roles (user_id, role_id) VALUES";
-
 		member.forEach((element) => {
 			InsertGuildUser += `('${element.id}', '${element.nickname ? element.nickname : element.user.username}'),`;
-			element.roles.cache.forEach(role => {
-				InsertGuildUserRoles += `('${element.id}', '${role.id}'),`
-			});
+
 		})
 
 		InsertGuildUser = `${InsertGuildUser.slice(0, -1)};`;
-		InsertGuildUserRoles = `${InsertGuildUserRoles.slice(0, -1)};`;
 
-		this.GetQuery(`${InsertGuildUser} ${InsertGuildUserRoles}`);
+		await this.GetQuery(InsertGuildUser);
 	}
 
 	// User refers to the the the discord account. It has no assosiation with the guilds(servers) the user is in.
@@ -568,7 +827,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 		InsertUsers = `${InsertUsers.slice(0, -1)};`;
 		InsertUsersToGuild = `${InsertUsersToGuild.slice(0, -1)};`;
 
-		this.GetQuery(`${InsertUsers} ${InsertUsersToGuild}`);
+		await this.GetQuery(`${InsertUsers} ${InsertUsersToGuild}`);
 	}
 
 	// GuildMember is removed from a guild. That member will be removed from that guild
@@ -596,25 +855,8 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 			return true;
 		}
 	}
-	public AddGuild(Guild: Guild, Channels: Collection<string, TextChannel>) {
-		// create the query for all the channels
-		let InsertChannels = "INSERT INTO channels (id, name, type, position) VALUES";
-		let InsertChannelsToGuild = "INSERT INTO guild_to_channel (guild_id, channel_id) VALUES";
-		Channels.forEach((element) => {
-			InsertChannels += `('${element.id}', '${element.name}', '${element.type}', '${element.position}'),`;
-			InsertChannelsToGuild += `('${Guild.id}', '${element.id}'),`;
-		});
-		// replace last , with ;
-		InsertChannels = `${InsertChannels.slice(0, -1)};`;
-		InsertChannelsToGuild = `${InsertChannelsToGuild.slice(0, -1)};`;
-
-		this.GetQuery(
-			`
-				INSERT INTO guilds (id, name , owner_id) VALUES ('${Guild.id}', '${Guild.name}', '${Guild.ownerID}');
-				${InsertChannels}
-				${InsertChannelsToGuild}
-			`,
-		);
+	public AddGuild(Guild: Guild) {
+		this.GetQuery(`INSERT INTO guilds (id, name , owner_id) VALUES ('${Guild.id}', '${Guild.name}', '${Guild.ownerID}');`);
 	}
 	public async UpdateAllChannels(Channels: ChannelManager) {
 		const query = "UPDATE `channels` SET `name`=?,`type`=?,`position`=? WHERE `channels`.`id` = ?;";
@@ -627,7 +869,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 				args.push(element.name, element.type, element.position);
 			} else if (element instanceof CategoryChannel) {
 				args.push(element.name, element.type, element.position);
-			} else if(element instanceof DMChannel) {
+			} else if (element instanceof DMChannel) {
 				// args.push(element.name, element.type, element.position);
 			} else {
 				this.AddLog(`Unimplemeneted type of type ${element.type}, ${element.id}`, LogTypes.channel);
@@ -645,7 +887,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 	*/
 	public async DeleteMessage(msg: PartialMessage) {
 		if (DEBUG_LOG_ENABLED.DeleteMessage) {
-			console.log("Message Deleted =>" , msg);
+			console.log("Message Deleted =>", msg);
 		}
 		const UpdateDeleteMessageQuery = `UPDATE channel_messages SET is_deleted=1 WHERE id = '${msg.id}';`;
 		const DeleteMessageQuery = `INSERT INTO channel_messages_deleted (message_id, deleted_at) VALUES ('${msg.id}', '${Date.now()}');`
@@ -672,7 +914,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 	public async DeleteMessages(msgs: Collection<string, PartialMessage>) {
 		if (DEBUG_LOG_ENABLED.DeleteMessageBulk) {
 			msgs.forEach((element) => {
-				console.log("Message Deleted =>" , element);
+				console.log("Message Deleted =>", element);
 			})
 		}
 		let DeleteMessagesQuery = "UPDATE channel_messages SET is_deleted=1 WHERE id IN (";
@@ -747,30 +989,50 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 		this.GetQuery(UpdateGuildmemberNickname);
 	}
 
-	public async UpdateChannelPosition(channelId: string, newPos: number) {
+	public async UpdateChannelPosition(channelId: string, newPos: number, type: "text" | "dm" | "voice" | "group" | "category" | "news" | "store" | "unknown") {
 		if (DEBUG_LOG_ENABLED.ChannelUpdate.position) {
 			console.log(`New Channel Position => ${newPos} for channel: ${channelId}`)
-			
 		}
 
-		await this.prisma.channels.update({
-			where:{
-				id: channelId
-			},
-			data:{
-				position: newPos
-			}
-		})
+		if (type === "text") {
+			this.prisma.channel_text.update({ where: { channel_id: channelId }, data: { position: newPos } })
+		} else if (type === "voice") {
+			this.prisma.channel_voice.update({ where: { channel_id: channelId }, data: { position: newPos } })
+		} else if (type === "category") {
+			this.prisma.channel_category.update({ where: { channel_id: channelId }, data: { position: newPos } })
+		} else if (type === "news") {
+			this.prisma.channel_news.update({ where: { channel_id: channelId }, data: { position: newPos } })
+		} else if (type === "store") {
+			this.prisma.channel_store.update({ where: { channel_id: channelId }, data: { position: newPos } })
+		}
+	}
+
+	public async UpdateChannelname(channelId: string, name: string, type: "text" | "dm" | "voice" | "group" | "category" | "news" | "store" | "unknown") {
+		if (DEBUG_LOG_ENABLED.ChannelUpdate.name) {
+			console.log(`New Channel name => ${name} for channel: ${channelId}`)
+		}
+
+		if (type === "text") {
+			this.prisma.channel_text.update({ where: { channel_id: channelId }, data: { name: name } })
+		} else if (type === "voice") {
+			this.prisma.channel_voice.update({ where: { channel_id: channelId }, data: { name: name } })
+		} else if (type === "category") {
+			this.prisma.channel_category.update({ where: { channel_id: channelId }, data: { name: name } })
+		} else if (type === "news") {
+			this.prisma.channel_news.update({ where: { channel_id: channelId }, data: { name: name } })
+		} else if (type === "store") {
+			this.prisma.channel_store.update({ where: { channel_id: channelId }, data: { name: name } })
+		}
 	}
 
 	public GetDMChannel(channel: DMChannel): Promise<ChannelsInterface[]> {
-		const GetDMChannelQuery = `SELECT id FROM channels WHERE id = ${channel.id}`
+		const GetDMChannelQuery = `SELECT channel_id FROM channels WHERE channel_id = ${channel.id}`
 
 		const a = this.GetQuery(GetDMChannelQuery)
 
 		return a
 	}
-}	
+}
 
 
 
@@ -801,6 +1063,13 @@ interface RolesInterface {
 interface UserToRoleInterface {
 	user_id: string,
 	role_id: string,
+}
+
+export interface ChannelRolePermissions {
+	channel_id: string,
+	role_id: string,
+	allow_bitfield: number,
+	deny_bitfield: number,
 }
 
 export enum LogTypes {
