@@ -1,24 +1,23 @@
 import { token } from "./Config";
-import DB, { LogTypes } from "./DB/DB";
+import DB, { ChannelRolePermissions, LogTypes } from "./DB/DB";
 import { Channel, Client, Collection, TextChannel, PartialMessage, GuildMember, Role, DMChannel, GuildChannel, VoiceChannel, CategoryChannel, NewsChannel, StoreChannel } from "discord.js";
 import { HandleVoiceState, EnumVoiceState } from "./HandleVoiceState";
 
 import { PerformanceObserver, performance } from 'perf_hooks';
-// import { obs } from "../timer"
+import { obs } from "../timer"
+
+obs;
 
 import chalk from "chalk";
 import { WebSocket } from "./WebSocketClient";
+import { prisma } from "nexus-plugin-prisma";
+
 
 // Used to measure performance
 // performance.mark("name")
 // performance.measure("name", "mark 1", "mark 2")
 // Functions processes all measures
 
-export const obs = new PerformanceObserver((items) => {
-	console.log(items.getEntries()[0].name + ": " + items.getEntries()[0].duration);
-	performance.clearMarks();
-});
-obs.observe({ entryTypes: ['measure'] });
 
 export const ctx = new chalk.Instance({ level: 3 });
 // process.on("exit", () => {
@@ -48,9 +47,7 @@ async function handleGuild(): Promise<void> {
 	database.GuildId = GuildKey!;
 	if (await database.FirstTimeInGuild(GuildKey!)) {
 		database.AddGuild(
-			client.guilds.cache.first()!,
-			(client.channels.cache as Collection<string, TextChannel>),
-		);
+			client.guilds.cache.first()!);
 		console.log(`First time in ${client.guilds.cache.first()?.name}`)
 	}
 }
@@ -68,17 +65,202 @@ async function handleChannels(): Promise<void> {
 		channels.delete(key)
 	});
 	if (ChannelsToAdd.length > 0) {
-		database.AddChannels(ChannelsToAdd);
+		await database.AddChannels(ChannelsToAdd);
 		console.log(`Added new channels`)
 	}
 	// Channels that are present in our DB but not in the chanel
 	if (channels.size > 0) {
-		database.RemoveChannels(channels)
+		await database.RemoveChannels(channels)
 	}
 
 	// Update ALL channels when connecting to a server
 	if (client.channels.cache.size > 0) {
-		database.UpdateAllChannels(client.channels);
+		// database.UpdateAllChannels(client.channels);
+	}
+
+}
+
+function HandleAddingPermissions<T extends TextChannel | VoiceChannel | StoreChannel | CategoryChannel | NewsChannel>(element: T, a: Map<string, ChannelRolePermissions[]>) {
+	if (element.permissionOverwrites.size > 0) {
+		// Check if there is any permission present
+		element.permissionOverwrites.forEach((permissionOverwrites, key) => {
+			if (!a.has(element.id)) {
+				a.set(element.id, [{
+					allow_bitfield: permissionOverwrites.allow.bitfield,
+					channel_id: element.id,
+					deny_bitfield: permissionOverwrites.deny.bitfield,
+					role_id: permissionOverwrites.id
+				}])
+			} else {
+				a.get(element.id)?.push({
+					allow_bitfield: permissionOverwrites.allow.bitfield,
+					channel_id: element.id,
+					deny_bitfield: permissionOverwrites.deny.bitfield,
+					role_id: permissionOverwrites.id
+				})
+			}
+		})
+	} else {
+		// No permissions. Do nothing
+	}
+}
+
+function HandleUpdatingPermissions<T extends TextChannel | VoiceChannel | StoreChannel | CategoryChannel | NewsChannel>
+(element: T, Roles: ChannelRolePermissions[], j: number, b:Map<string, ChannelRolePermissions[]>) {
+	element.permissionOverwrites.forEach((permissionOverwrites, key) => {
+		if (Roles[j]) {
+			// Update existing role
+			// We have the permission override role in our DB
+			if (permissionOverwrites.allow.bitfield === Roles[j].allow_bitfield) {
+			} else {
+				Roles[j].allow_bitfield = permissionOverwrites.allow.bitfield
+				if (b.has(element.id)) {
+					b.get(element.id)![j] = {
+						allow_bitfield: permissionOverwrites.allow.bitfield,
+						channel_id: element.id,
+						deny_bitfield: permissionOverwrites.deny.bitfield,
+						role_id: permissionOverwrites.id
+					};
+
+				} else {
+					b.set(element.id, [{
+						allow_bitfield: permissionOverwrites.allow.bitfield,
+						channel_id: element.id,
+						deny_bitfield: permissionOverwrites.deny.bitfield,
+						role_id: permissionOverwrites.id
+					}])
+				}
+			}
+	
+			if (permissionOverwrites.deny.bitfield === Roles[j].deny_bitfield) {
+	
+			} else {
+				Roles[j].deny_bitfield = permissionOverwrites.deny.bitfield
+				if (b.has(element.id)) {
+					b.get(element.id)![j] = {
+						allow_bitfield: permissionOverwrites.allow.bitfield,
+						channel_id: element.id,
+						deny_bitfield: permissionOverwrites.deny.bitfield,
+						role_id: permissionOverwrites.id
+					};
+				} else {
+					b.set(element.id, [{
+						allow_bitfield: permissionOverwrites.allow.bitfield,
+						channel_id: element.id,
+						deny_bitfield: permissionOverwrites.deny.bitfield,
+						role_id: permissionOverwrites.id
+					}])
+				}
+			}
+			
+		} else {
+			// Add a role that is not present in our DB
+			if (b.has(element.id)) {
+				b.get(element.id)![j] = {
+					allow_bitfield: permissionOverwrites.allow.bitfield,
+					channel_id: element.id,
+					deny_bitfield: permissionOverwrites.deny.bitfield,
+					role_id: permissionOverwrites.id
+				};
+			} else {
+				b.set(element.id, [{
+					allow_bitfield: permissionOverwrites.allow.bitfield,
+					channel_id: element.id,
+					deny_bitfield: permissionOverwrites.deny.bitfield,
+					role_id: permissionOverwrites.id
+				}])
+			}
+		}
+
+		delete Roles[j]
+
+		j++;
+	})
+
+	return;
+}
+
+async function UpdateAllChannelRoles(): Promise<void> {
+
+}
+
+async function handleChannelRoles(): Promise<void> {
+	const ChannelPermissions = await database.GetChannelPermissions();
+
+	let a = new Map<string, ChannelRolePermissions[]>();
+	const PermissionsToAddUpdate = new Map<string, ChannelRolePermissions[]>();
+	const PermissionsToRemove: {channel_id: string, role_id: string}[]  = [];
+
+	ChannelPermissions.forEach((element) => {
+		if (!a.has(element.channel_id)) {
+			a.set(element.channel_id, [element])
+		} else {
+			a.get(element.channel_id)?.push(element)
+		}
+	})
+
+	client.channels.cache.forEach((element) => {
+		let j = 0
+		let RoleArr = a.get(element.id)!
+		// TODO: instanceof check are redundant?
+		if (RoleArr === undefined) {
+			// Some channels MAY NOT have permission overrides
+			// We don't have associated that channel with ANY roles
+			// If the channel doesn't have permission overrides we assume its (0,0) for @everyone
+			if (element instanceof TextChannel) {
+				HandleAddingPermissions(element, PermissionsToAddUpdate);
+			}
+			else if (element instanceof VoiceChannel) {
+				HandleAddingPermissions(element, PermissionsToAddUpdate);
+			}
+			else if (element instanceof CategoryChannel) {
+				HandleAddingPermissions(element, PermissionsToAddUpdate);
+			}
+			else if (element instanceof StoreChannel) {
+				HandleAddingPermissions(element, PermissionsToAddUpdate);
+			}
+			else if (element instanceof NewsChannel) {
+				HandleAddingPermissions(element, PermissionsToAddUpdate);
+			}
+		} else {
+			// We have a channel with AT LEAST 1 role
+
+			if (element instanceof TextChannel) {
+				HandleUpdatingPermissions(element, RoleArr, j, PermissionsToAddUpdate);
+			}
+			else if (element instanceof VoiceChannel) {
+				HandleUpdatingPermissions(element, RoleArr, j, PermissionsToAddUpdate);
+			}
+			else if (element instanceof CategoryChannel) {
+				HandleUpdatingPermissions(element, RoleArr, j, PermissionsToAddUpdate);
+			}
+			else if (element instanceof StoreChannel) {
+				HandleUpdatingPermissions(element, RoleArr, j, PermissionsToAddUpdate);
+			}
+			else if (element instanceof NewsChannel) {
+				HandleUpdatingPermissions(element, RoleArr, j, PermissionsToAddUpdate);
+			}
+			// DM channel has no permissions 
+			// else if (element instanceof DMChannel) {
+	
+			// }
+
+			// Go through all elements and check what's left
+			// The remaining elements need to be deleted from the DB
+			RoleArr.forEach((element, key) => {
+				if (element) {
+					PermissionsToRemove.push({channel_id: element.channel_id, role_id: element.role_id});
+				}
+			})
+		}
+		j = 0;
+	})
+
+	if (PermissionsToRemove.length > 0) {
+		await database.RemovePermissionFromChannel(PermissionsToRemove);
+	}
+	if (PermissionsToAddUpdate.size > 0) {
+		await database.AddUpdatePermissions(PermissionsToAddUpdate);		
 	}
 
 }
@@ -91,9 +273,6 @@ async function handleUsers(): Promise<void> {
 			// We don't have that user. Add it
 			UsersToAdd.push(element);
 		}
-		else {
-		}
-
 		GuildMembers.delete(key)
 	});
 	if (UsersToAdd.length > 0) {
@@ -144,14 +323,22 @@ async function handleRoles(): Promise<void> {
 }
 
 client.on("ready", async () => {
-	// register guild etc...
-	handleGuild();
-	// on joining check all channels since they bot is joining first time/ hasn't joined for a while
-	handleChannels();
-	// Check all users
-	handleUsers();
-	
-	handleRoles();
+	performance.mark("a");
+	// register guild
+	await handleGuild();
+	// Check all users. Remove, Add, Update
+	await handleUsers();
+	// Remove, Add, Update
+	await handleRoles();
+	// Remove, Add, Update
+	await handleChannels();
+	// Remove, Add, Update
+	await handleChannelRoles();
+	// await database.dummy(client.channels.cache.first()!);
+	performance.mark("b");
+
+	performance.measure("Init Operations done", "a", "b");
+	// await database.dummy(client.channels.cache.first()!)
 	database.AddLog(`Logged in as ${client.user!.tag}!`, LogTypes.general_log);
 });
 
@@ -184,10 +371,15 @@ client.on("channelCreate", async (channel) => {
 	else if (channel instanceof NewsChannel) {
 		database.AddChannels([channel]);
 	}
+	else if (channel instanceof DMChannel) {
+		//database.AddChannels([channel]);
+	}
+
 
 
 	await database.AddLog(`Text Channel Created: ${channel.type}`, LogTypes.channel);
 });
+
 
 // channelUpdate
 /* Emitted whenever a channel is updated - e.g. name change, topic change.
@@ -195,37 +387,55 @@ PARAMETER        TYPE        DESCRIPTION
 oldChannel       Channel     The channel before the update
 newChannel       Channel     The channel after the update    */
 client.on("channelUpdate", (oldChannel, newChannel) => {
-	if (newChannel instanceof TextChannel && oldChannel instanceof TextChannel) {
+	// TODO: remove redudant check for one of the channels as both are guaranteed to be of the same type.
+	if (oldChannel instanceof TextChannel && newChannel instanceof TextChannel) {
 		if (oldChannel.rawPosition !== newChannel.rawPosition) {
 			// Channel was moved in the guild hierarchy
-			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition);
+			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition, newChannel.type);
+		} else if (oldChannel.name !== newChannel.name) {
+			database.UpdateChannelname(newChannel.id, newChannel.name, newChannel.type);
+		} else if (oldChannel.permissionOverwrites !== newChannel.permissionOverwrites) {
+			database.UpdateChannelPermissions(newChannel.id, oldChannel.permissionOverwrites, newChannel.permissionOverwrites)
+			// permissionOverwrites is a Map with the roles that are being filtered
+			// There will always be the @everyone role
+			// unimplemented
+		} else if (oldChannel.topic !== newChannel.topic) {
+			database.UpdateTextChannelTopic(newChannel.id, newChannel.topic)
+			// unimplemented
+		} else if (oldChannel.rateLimitPerUser !== newChannel.rateLimitPerUser) {
+			database.UpdateTextChannelRateLimit(newChannel.id, newChannel.rateLimitPerUser)
+			// unimplemented
+		} else if (oldChannel.nsfw !== newChannel.nsfw) {
+			database.UpdateTextChannelNsfw(newChannel.id, newChannel.nsfw);
+			// unimplemented
 		}
 
-	} else if (newChannel instanceof VoiceChannel && oldChannel instanceof VoiceChannel) {
+	} else if (oldChannel instanceof VoiceChannel && newChannel instanceof VoiceChannel) {
 		if (oldChannel.rawPosition !== newChannel.rawPosition) {
 			// Channel was moved in the guild hierarchy
-			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition);
+			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition, newChannel.type);
 		}
 
-	} else if (newChannel instanceof CategoryChannel && oldChannel instanceof CategoryChannel) {
+	} else if (oldChannel instanceof CategoryChannel && newChannel instanceof CategoryChannel) {
 		if (oldChannel.rawPosition !== newChannel.rawPosition) {
 			// Channel was moved in the guild hierarchy
-			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition);
+			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition, newChannel.type);
 		}
 
-	} else if (newChannel instanceof DMChannel && oldChannel instanceof DMChannel) {
+	} else if (oldChannel instanceof DMChannel && newChannel instanceof DMChannel) {
 		database.AddLog(`DM channel update + ${newChannel.toJSON()}`, LogTypes.channel)
+		newChannel.recipient;
 
-	} else if (newChannel instanceof StoreChannel && oldChannel instanceof StoreChannel) {
+	} else if (oldChannel instanceof StoreChannel && newChannel instanceof StoreChannel) {
 		if (oldChannel.rawPosition !== newChannel.rawPosition) {
 			// Channel was moved in the guild hierarchy
-			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition);
+			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition, newChannel.type);
 		}
 
-	} else if (newChannel instanceof NewsChannel && oldChannel instanceof NewsChannel) {
+	} else if (oldChannel instanceof NewsChannel && newChannel instanceof NewsChannel) {
 		if (oldChannel.rawPosition !== newChannel.rawPosition) {
 			// Channel was moved in the guild hierarchy
-			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition);
+			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition, newChannel.type);
 		}
 
 	} else {
@@ -347,11 +557,19 @@ client.on("guildMemberAdd", async (member) => {
 });
 
 client.on("inviteCreate", (invite) => {
-	console.log(chalk.red(`Invite Created`, invite))
+	console.log(chalk.red(`Invite Created:`), invite)
+	if (invite.maxAge) {
+		setTimeout(() => {
+			database.ExpireInvite(invite);
+			database.AddLog("Event Expired", LogTypes.general_log)
+		}, (invite.maxAge + 1000) * 1000);
+	}
+	database.AddInvite(invite)
 })
 
 client.on("inviteDelete", (invite) => {
 	console.log(chalk.red(`Invite Deleted`, invite))
+	database.RemoveInvite(invite)
 })
 
 // guildMemberRemove
@@ -403,7 +621,7 @@ client.on("guildMemberUpdate", (oldMember, newMember) => {
 			// Nickname was changed
 			database.ChangeNickname(newMember);
 		}
-		else if (oldMember.roles.cache.size != newMember.roles.cache.size) {
+		else if (oldMember.roles.cache.size !== newMember.roles.cache.size) {
 			// Role was changed 
 			if (oldMember.roles.cache.size > newMember.roles.cache.size) {
 				// Role was removed
@@ -449,6 +667,10 @@ oldGuild      Guild     The guild before the update
 newGuild      Guild     The guild after the update    */
 client.on("guildUpdate", (oldGuild, newGuild) => {
 	console.error(`a guild is updated`);
+	if (oldGuild.name !== newGuild.name) {
+		// guild name was changed
+		database.UpdateGuildName(newGuild.id, newGuild.name);
+	}
 });
 
 // messageDelete
@@ -632,13 +854,14 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
 	// 2) the bot is connected after a user has joined ( not present in bot chache )
 
 	if (newState.channel !== null) {
-		HandleVoiceState(oldState, newState, database);
 		// User is still present in the channel
 		// Check what was the action
 		if (oldState.channel === null) {
 			// User Joins a voice channel
 			database.AddVoiceState(EnumVoiceState.channel_join, newState.id, newState.channelID!)
+			return;
 		}
+		HandleVoiceState(oldState, newState, database);
 	} else if (newState.channel === null) {
 		// User leaves a voice channel
 		database.AddVoiceState(EnumVoiceState.channel_leave, newState.id, oldState.channelID!)
@@ -672,7 +895,8 @@ client.on("message", async (msg) => {
 				// We have that channel in our DB
 			} else {
 				// We don't have the chanel. Add it
-				await database.AddChannels([msg.channel])
+				//await database.AddChannels([msg.channel])
+				await database.AddDMChannel(msg.channel);
 			}
 			DMChanellsSet.add(msg.channel.id)
 
