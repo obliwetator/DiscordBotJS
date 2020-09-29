@@ -7,21 +7,22 @@ import DB from "./DB/DB"
  */
 export async function HandleVoiceState(oldState: VoiceState, newState: VoiceState, database: DB) {
 	// User is muted/defeaned in any way
+	
 	if ((!oldState.selfDeaf && newState.selfDeaf) ||
 		(!oldState.selfMute && newState.selfMute) ||
 		(!oldState.serverDeaf && newState.serverDeaf) ||
 		(!oldState.serverMute && newState.serverMute)) {
 		// User was muted
 		if (newState.selfMute && !oldState.selfMute) {
-			database.AddVoiceState(EnumVoiceState.mute, newState.id, newState.channelID!)
+			database.AddVoiceState(EnumVoiceState.mute, newState.member?.id!, newState.channelID!)
 		} else if (newState.serverMute && !oldState.serverMute) {
-			database.AddVoiceState(EnumVoiceState.server_mute, newState.id, newState.channelID!, await HandleVoiceStateExecutor(newState))
+			database.AddVoiceState(EnumVoiceState.server_mute, newState.member?.id!, newState.channelID!, await HandleVoiceStateExecutor(newState))
 		}
 		// defeaned
 		if (newState.selfDeaf && !oldState.selfDeaf) {
-			database.AddVoiceState(EnumVoiceState.deaf, newState.id, newState.channelID!)
+			database.AddVoiceState(EnumVoiceState.deaf, newState.member?.id!, newState.channelID!)
 		} else if (newState.serverDeaf && !oldState.serverDeaf) {
-			database.AddVoiceState(EnumVoiceState.server_deaf, newState.id, newState.channelID!, await HandleVoiceStateExecutor(newState))
+			database.AddVoiceState(EnumVoiceState.server_deaf, newState.member?.id!, newState.channelID!, await HandleVoiceStateExecutor(newState))
 		}
 
 		return
@@ -31,15 +32,15 @@ export async function HandleVoiceState(oldState: VoiceState, newState: VoiceStat
 		(oldState.serverMute && !newState.serverMute)) {
 		// user was unmuted
 		if (!newState.selfMute && oldState.selfMute) {
-			database.AddVoiceState(EnumVoiceState.unmute, newState.id, newState.channelID!)
+			database.AddVoiceState(EnumVoiceState.unmute, newState.member?.id!, newState.channelID!)
 		} else if (!newState.serverMute && oldState.serverMute) {
-			database.AddVoiceState(EnumVoiceState.server_unmute, newState.id, newState.channelID!, await HandleVoiceStateExecutor(newState))
+			database.AddVoiceState(EnumVoiceState.server_unmute, newState.member?.id!, newState.channelID!, await HandleVoiceStateExecutor(newState))
 		}
 		// undeafened
 		if (!newState.selfDeaf && oldState.selfDeaf) {
-			database.AddVoiceState(EnumVoiceState.undeafen, newState.id, newState.channelID!)
+			database.AddVoiceState(EnumVoiceState.undeafen, newState.member?.id!, newState.channelID!)
 		} else if (!newState.serverDeaf && oldState.serverDeaf) {
-			database.AddVoiceState(EnumVoiceState.server_undeafen, newState.id, newState.channelID!, await HandleVoiceStateExecutor(newState))
+			database.AddVoiceState(EnumVoiceState.server_undeafen, newState.member?.id!, newState.channelID!, await HandleVoiceStateExecutor(newState))
 		}
 
 		return
@@ -47,23 +48,21 @@ export async function HandleVoiceState(oldState: VoiceState, newState: VoiceStat
 
 	if (newState.selfVideo && !oldState.selfVideo) {
 		// User turned on webcam
-		database.AddVoiceState(EnumVoiceState.video_start, newState.id, newState.channelID!)
+		database.AddVoiceState(EnumVoiceState.video_start, newState.member?.id!, newState.channelID!)
 		return;
-	}
-	else if (!newState.selfVideo && oldState.selfVideo) {
+	} else if (!newState.selfVideo && oldState.selfVideo) {
 		// User turned off camera
-		database.AddVoiceState(EnumVoiceState.video_stop, newState.id, newState.channelID!)
+		database.AddVoiceState(EnumVoiceState.video_stop, newState.member?.id!, newState.channelID!)
 		return;
 	}
 
 	if (newState.streaming && !oldState.streaming) {
 		// User started streaming
-		database.AddVoiceState(EnumVoiceState.streaming_start, newState.id, newState.channelID!)
+		database.AddVoiceState(EnumVoiceState.streaming_start, newState.member?.id!, newState.channelID!)
 		return;
-	}
-	else if (!newState.streaming && oldState.streaming) {
+	} else if (!newState.streaming && oldState.streaming) {
 		// User stopped streaming
-		database.AddVoiceState(EnumVoiceState.streaming_stop, newState.id, newState.channelID!)
+		database.AddVoiceState(EnumVoiceState.streaming_stop, newState.member?.id!, newState.channelID!)
 		return;
 	}
 }
