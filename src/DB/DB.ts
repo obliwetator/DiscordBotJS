@@ -55,30 +55,74 @@ export const DEBUG_LOG_ENABLED = {
 }
 
 class DB {
-	public async AddUpdatePermissions(PermissionsToAddUpdate: Map<string, ChannelRolePermissions[]>) {
-		let query = "INSERT INTO channel_permissions (channel_id, role_id, allow_bitfield, deny_bitfield) VALUES"
-		let dup = "ON DUPLICATE KEY UPDATE allow_bitfield = VALUES(allow_bitfield) , deny_bitfield = VALUES(deny_bitfield)"
+	// TODO: Rename
 
-		PermissionsToAddUpdate.forEach((permissions) => {
+	public async GetMessage(id: string): Promise<ChannelMessage[]> {
+		const sql = `SELECT * FROM channel_messages WHERE id = '${id}'`
+
+		return await this.GetQuery(sql);
+	}
+	public async UpdateChannelPins(msg: Message) {
+		const sql = `UPDATE channel_messages SET is_pinned = 1 WHERE id = '${msg.id}';`
+
+		await this.GetQuery(sql);
+	}
+	// TODO: Add executor
+	public async UpdateChannelPermissions1(PermissionsToUpdate: Map<string, ChannelRolePermissions[]>) {
+		let query = "INSERT INTO channel_permissions (channel_id, role_id, type, allow_bitfield, deny_bitfield) VALUES"
+		let dup = "ON DUPLICATE KEY UPDATE allow_bitfield = VALUES(allow_bitfield) , deny_bitfield = VALUES(deny_bitfield)"
+		let UpdateLog = "INSERT INTO log__channel_permissions (role_id, channel_id, type, og_allow, og_deny) VALUES"
+		let type = ""
+		PermissionsToUpdate.forEach((permissions) => {
 			permissions.forEach((element) => {
-				query += `('${element.channel_id}', '${element.role_id}', '${element.allow_bitfield}', '${element.deny_bitfield}'),`
+				if (element.both_changed) {
+					type = "update_both"
+				} else {
+					if (element.allow_changed) {
+						type = "update_allow"
+					} else {
+						type = "update_deny"
+					}
+				}
+				query += `('${element.channel_id}', '${element.role_id}', '${element.type}', ${element.allow_bitfield}, ${element.deny_bitfield}),`
+				UpdateLog += `('${element.role_id}', '${element.channel_id}', '${type}', ${(type === "update_both" || type === "update_allow") ? element.allow_bitfield : "NULL"}, ${(type === "update_both" || type === "update_deny") ? element.deny_bitfield : "NULL"})`
 			})
 		})
 
 		query = `${query.slice(0, -1)} `;
-
-		this.GetQuery(query + dup)
+		let a = query + dup + ";" + UpdateLog;
+		await this.GetQuery(query + dup);
 	}
-	public async RemovePermissionFromChannel(PermissionsToRemove: {channel_id: string, role_id: string}[]) {
-		let query = "DELETE FROM channel_permissions WHERE (channel_id, role_id) IN ("
-		// TODO: Log the deletion of a Permission
-		PermissionsToRemove.forEach((element, key) => {
-			query += `('${element.channel_id}', '${element.role_id}'),`
+	// TODO: Add executor
+	public async AddChannelPermissions(PermissionsToAddUpdate: Map<string, ChannelRolePermissions[]>) {
+		let query = "INSERT INTO channel_permissions (channel_id, role_id, type, allow_bitfield, deny_bitfield) VALUES"
+		let dup = "ON DUPLICATE KEY UPDATE allow_bitfield = VALUES(allow_bitfield) , deny_bitfield = VALUES(deny_bitfield)"
+
+		PermissionsToAddUpdate.forEach((permissions) => {
+			permissions.forEach((element) => {
+				query += `('${element.channel_id}', '${element.role_id}', '${element.type}', '${element.allow_bitfield}', '${element.deny_bitfield}'),`
+			})
 		})
 
-		query = `${query.slice(0, -1)})`;
+		query = `${query.slice(0, -1)} `;
+		this.GetQuery(query + dup);
+	}
+	/**
+	 * Delete a channel permission and add a log
+	 * When adding a long the values at the time of removal are set
+	 */
+	public async RemovePermissionFromChannel(PermissionsToRemove: { channel_id: string, role_id: string, deny: number, allow: number }[], executor: string | null = null) {
+		let query = "DELETE FROM channel_permissions WHERE (channel_id, role_id) IN ("
+		let LogQuery = `INSERT INTO log__channel_permissions (role_id, channel_id, executor, type, og_allow, og_deny) VALUES `
+		PermissionsToRemove.forEach((element, key) => {
+			query += `('${element.channel_id}', '${element.role_id}'),`
+			LogQuery += `('${element.role_id}', '${element.channel_id}', ${executor ? `'${executor}'` : "NULL"}, 'remove', ${element.allow}, ${element.deny}),`
+		})
 
-		this.GetQuery(query);
+		query = `${query.slice(0, -1)});`;
+		LogQuery = `${LogQuery.slice(0, -1)};`;
+
+		await this.GetQuery(query + LogQuery);
 	}
 	public async GetChannelPermissions() {
 		// Very inneficient query
@@ -105,7 +149,7 @@ class DB {
 			data: {
 				channel_id: channel.id,
 				types: "dm",
-				channel_dm: {
+				channel__dm: {
 					create: {
 						recepient: channel.recipient.id
 					}
@@ -118,28 +162,44 @@ class DB {
 			console.log(`Channel id: ${channelId} has set nsfw to ${nsfw}`)
 		}
 
-		await this.prisma.channel_text.update({ where: { channel_id: channelId }, data: { nsfw: nsfw } })
+		await this.prisma.channel__text.update({ where: { channel_id: channelId }, data: { nsfw: nsfw } })
 	}
 	public async UpdateTextChannelRateLimit(channelId: string, rateLimitPerUser: number) {
 		if (DEBUG_LOG_ENABLED.ChannelUpdate.rateLimit) {
 			console.log(`Channel id: ${channelId} has set ratelimit to ${rateLimitPerUser}`)
 		}
 
-		await this.prisma.channel_text.update({ where: { channel_id: channelId }, data: { rate_limit_per_user: rateLimitPerUser } })
+		await this.prisma.channel__text.update({ where: { channel_id: channelId }, data: { rate_limit_per_user: rateLimitPerUser } })
 	}
 	public async UpdateTextChannelTopic(channelId: string, topic: string | null) {
 		if (DEBUG_LOG_ENABLED.ChannelUpdate.topic) {
 			console.log(`Channel id: ${channelId} has set topic to ${topic}`)
 		}
 
-		await this.prisma.channel_text.update({ where: { channel_id: channelId }, data: { topic: topic } })
+		await this.prisma.channel__text.update({ where: { channel_id: channelId }, data: { topic: topic } })
 	}
+
+	/**
+	 * og_deny and _allow log the values BEFORE the change. Current values will be in the channel_permissions
+	 * Except when deleting, which will list both values
+	 */
 	public async UpdateChannelPermissions(channelId: string, permissionOverwritesOld: Collection<string, PermissionOverwrites>, permissionOverwritesNew: Collection<string, PermissionOverwrites>) {
 		if (DEBUG_LOG_ENABLED.ChannelUpdate.permissions) {
 			permissionOverwritesNew.forEach((element, key) => {
 				console.log(`Permission updated for channel id: ${channelId} for the permission: ${key}`)
 			})
 		}
+		let AllowDiff: boolean
+		let DenyDiff: boolean
+		let type: "add" | "remove" | "update_deny" | "update_allow" | "update_both"
+		let UpdateAllowIndex = 1 // Defaults to NULL
+		let UpdateDenyIndex = 1
+
+		// TODO: Add executor
+		let executor:string; //temp
+
+		let Update: [number, string][] = [[0, "NULL"], [0, "NULL"]];
+
 
 		if (permissionOverwritesOld.size > permissionOverwritesNew.size) {
 			// Role was removed from channel 
@@ -148,8 +208,7 @@ class DB {
 					// Permissions match do nothing
 				} else {
 					// prisma2 bugs out when deleting a entry with 2 unique collumns
-					// 
-					await this.RemovePermissionFromChannel([{channel_id:channelId, role_id: key}])
+					await this.RemovePermissionFromChannel([{ channel_id: channelId, role_id: key, allow: element.allow.bitfield, deny: element.deny.bitfield }])
 					return;
 				}
 			})
@@ -157,6 +216,9 @@ class DB {
 			// Role was added
 			console.log('Role Added')
 			permissionOverwritesNew.forEach(async (element, key) => {
+				AllowDiff = false
+				DenyDiff = false
+
 				if (!permissionOverwritesOld.has(key)) {
 					// permissions don't match add that permission
 					await this.prisma.channel_permissions.create({
@@ -164,27 +226,54 @@ class DB {
 							channels: { connect: { channel_id: channelId } },
 							allow_bitfield: element.allow.bitfield,
 							deny_bitfield: element.deny.bitfield,
-							role_id: key
+							role_id: key,
+							type: element.type
 						}
 					})
+
+					this.GetQuery(`INSERT INTO log__channel_permissions (role_id, channel_id, executor, type, og_allow, og_deny) VALUES ('${element.id}', '${channelId}', ${executor ? `'${executor}'` : "NULL"}, 'add', NULL, NULL)`)
 					return;
 				}
 
 			})
 		} else {
 			// a permission for a role was updated
-			permissionOverwritesNew.forEach(async (element, key) => {
-				if (element.deny.bitfield !== permissionOverwritesOld.get(key)?.deny.bitfield) {
-					// Deny permission changed
-					await this.GetQuery(`UPDATE channel_permissions SET deny_bitfield = '${element.deny.bitfield}' WHERE channel_id = '${channelId}' AND role_id = '${element.id}'`)
-
-					return;
-				} else if (element.allow.bitfield !== permissionOverwritesOld.get(key)?.allow.bitfield) {
-					// Allow permissions changed
-					await this.GetQuery(`UPDATE channel_permissions SET allow_bitfield = '${element.allow.bitfield}' WHERE channel_id = '${channelId}' AND role_id = '${element.id}'`)
-
-					return;
+			// LOG: update_both, update_deny,update_allow
+			permissionOverwritesOld.forEach(async (OldElement, key) => {
+				// Allow diff
+				if (OldElement.allow.bitfield !== permissionOverwritesNew.get(key)?.allow.bitfield) {
+					AllowDiff = true;
 				}
+				// Deny diff
+				if (OldElement.deny.bitfield !== permissionOverwritesNew.get(key)?.deny.bitfield) {
+					DenyDiff = true;
+				}
+				// Both changed
+				if (AllowDiff && DenyDiff) {
+					type = "update_both"
+					Update[0][0] = OldElement.allow.bitfield;
+					Update[1][0] = OldElement.deny.bitfield;
+					UpdateAllowIndex = 0
+					UpdateDenyIndex = 0
+				} else {
+					if (AllowDiff) {
+						// allow changed
+						type = "update_allow"
+						Update[0][0] = OldElement.allow.bitfield;
+						UpdateAllowIndex = 0
+					} else {
+						// deny chanegd
+						type = "update_deny"
+						Update[1][0] = OldElement.deny.bitfield;
+						UpdateDenyIndex = 0
+					}
+				}
+
+				const NewUpdate = permissionOverwritesNew.get(key)!
+				
+				let AddLog = `INSERT INTO log__channel_permissions (role_id, channel_id, executor, type, og_allow, og_deny) VALUES ('${OldElement.id}', '${channelId}', NULL, '${type}', ${Update[0][UpdateAllowIndex]}, ${Update[1][UpdateDenyIndex]});`
+				let a = `UPDATE channel_permissions SET allow_bitfield = ${OldElement.allow.bitfield !== NewUpdate.allow.bitfield ? NewUpdate.allow.bitfield : "allow_bitfield"}, deny_bitfield = ${OldElement.deny.bitfield !== NewUpdate.deny.bitfield ? NewUpdate.deny.bitfield : "deny_bitfield"} WHERE channel_id = '${channelId}' AND role_id = '${OldElement.id}'`
+				 await this.GetQuery(a + ";" + AddLog)
 			});
 		}
 
@@ -479,8 +568,8 @@ VALUES ('${message.id}','${message.embeds[0].title}', '${message.embeds[0].type}
 			`${EmbededQuery}${AttachmentQuery}\
 INSERT IGNORE INTO users (id, username, discriminator, bot)\
 VALUES ('${message.author.id}', '${message.author.username}', '${message.author.discriminator}', ${message.author.bot ? 1 : 0});\
-INSERT INTO channel_messages (id, content, author, type, embeds, attachments, channel_id)\
-VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.author.id}', '${message.type}', ${hasEmbed ? `${message.id}` : "NULL"}, ${hasAttachment ? `${message.attachments.first()?.id}` : "NULL"}, '${message.channel.id}');`)
+INSERT INTO channel_messages (id, content, author, type, embeds, attachments, channel_id, is_pinned)\
+VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.author.id}', '${message.type}', ${hasEmbed ? `${message.id}` : "NULL"}, ${hasAttachment ? `${message.attachments.first()?.id}` : "NULL"}, '${message.channel.id}', ${message.pinned ? 1 : 0});`)
 			;
 	}
 	/**
@@ -505,7 +594,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 
 		let ChannelQuery = "INSERT INTO channels (channel_id, types) VALUES"
 		let GuildToChannelQuery = "INSERT INTO guild_to_channel (guild_id, channel_id) VALUES";
-		let ChannelPermissionsQuery = "INSERT INTO channel_permissions (channel_id, role_id, allow_bitfield, deny_bitfield) VALUES"
+		let ChannelPermissionsQuery = "INSERT INTO channel_permissions (channel_id, role_id, type, allow_bitfield, deny_bitfield) VALUES"
 		let InsertChannelQuery = "";
 
 		channels.forEach((element) => {
@@ -514,47 +603,47 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 
 			if (element instanceof TextChannel) {
 				element.permissionOverwrites.forEach((permission) => {
-					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
+					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 				})
 
 				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
-				InsertChannelQuery += `INSERT INTO channel_text (channel_id, name, position, topic, nsfw, rate_limit_per_user) VALUES ('${element.id}', '${element.name}', '${element.position}', '${element.topic}', '${element.nsfw ? 1 : 0}', '${element.rateLimitPerUser}');`
+				InsertChannelQuery += `INSERT INTO channel__text (channel_id, name, position, topic, nsfw, rate_limit_per_user) VALUES ('${element.id}', '${element.name}', '${element.position}', '${element.topic}', '${element.nsfw ? 1 : 0}', '${element.rateLimitPerUser}');`
 
 			}
 			else if (element instanceof VoiceChannel) {
 				element.permissionOverwrites.forEach((permission) => {
-					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
+					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 				})
 
 				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
-				InsertChannelQuery += `INSERT INTO channel_voice (channel_id, name, position) VALUES ('${element.id}', '${element.name}', '${element.position}');`
+				InsertChannelQuery += `INSERT INTO channel__voice (channel_id, name, position) VALUES ('${element.id}', '${element.name}', '${element.position}');`
 			}
 			else if (element instanceof CategoryChannel) {
 				element.permissionOverwrites.forEach((permission) => {
-					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
+					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 				})
 
 				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
-				InsertChannelQuery += `INSERT INTO channel_category (channel_id, position, name) VALUES ('${element.id}', '${element.position}', '${element.name}');`
+				InsertChannelQuery += `INSERT INTO channel__category (channel_id, position, name) VALUES ('${element.id}', '${element.position}', '${element.name}');`
 			}
 			else if (element instanceof DMChannel) {
 				return;
 			}
 			else if (element instanceof StoreChannel) {
 				element.permissionOverwrites.forEach((permission) => {
-					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
+					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 				})
 
 				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
-				InsertChannelQuery += `INSERT INTO channel_store (channel_id, name, position) VALUES ('${element.id}', '${element.name}', '${element.position}');`
+				InsertChannelQuery += `INSERT INTO channel__store (channel_id, name, position) VALUES ('${element.id}', '${element.name}', '${element.position}');`
 			}
 			else if (element instanceof NewsChannel) {
 				element.permissionOverwrites.forEach((permission) => {
-					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
+					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 				})
 
 				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
-				InsertChannelQuery += `INSERT INTO channel_news (channel_id, name, position) VALUES ('${element.id}', '${element.name}', '${element.position}');`
+				InsertChannelQuery += `INSERT INTO channel__news (channel_id, name, position) VALUES ('${element.id}', '${element.name}', '${element.position}');`
 			} else {
 				// Either GroupDM channel or unkown
 				console.log(chalk.red(''))
@@ -567,6 +656,10 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 		ChannelPermissionsQuery = `${ChannelPermissionsQuery.slice(0, -1)};`;
 		GuildToChannelQuery = `${GuildToChannelQuery.slice(0, -1)};`;
 
+		if (InsertChannelQuery.length === 0) {
+			// DM Channel
+			return;
+		}
 		await this.GetQuery(ChannelQuery);
 		await this.GetQuery(ChannelPermissionsQuery)
 		await this.GetQuery(GuildToChannelQuery)
@@ -889,10 +982,14 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 		if (DEBUG_LOG_ENABLED.DeleteMessage) {
 			console.log("Message Deleted =>", msg);
 		}
-		const UpdateDeleteMessageQuery = `UPDATE channel_messages SET is_deleted=1 WHERE id = '${msg.id}';`;
-		const DeleteMessageQuery = `INSERT INTO channel_messages_deleted (message_id, deleted_at) VALUES ('${msg.id}', '${Date.now()}');`
+		// Updates exisiting message or adds a new entry with the three properties provided
+		// ID          CHANNEL_ID         TYPE
+		const DeleteProcedure = `CALL delete_message('${msg.id}', '${msg.channel.id}', 'UNKOWN')`;
 
-		this.GetQuery(UpdateDeleteMessageQuery + DeleteMessageQuery);
+		// const UpdateDeleteMessageQuery = `UPDATE channel_messages SET is_deleted=1 WHERE id = '${msg.id}';`;
+		// const DeleteMessageQuery = `INSERT INTO channel_messages_deleted (message_id, deleted_at) VALUES ('${msg.id}');`
+
+		this.GetQuery(DeleteProcedure);
 	}
 	/**  
 	 * Same as base function but we know who deleted the message
@@ -961,16 +1058,10 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 		this.GetQuery(VoiceStateQuery);
 	}
 
-	public async GetDeletionLogByTimestamp(ts: number): Promise<channel_messages_deleted[]> {
-		const GetDeletionLogByTimestamp = `SELECT * FROM channel_messages_deleted WHERE deleted_at = "${ts}";`
-
-		return this.GetQuery(GetDeletionLogByTimestamp);
-	}
-
 	ChangeNickname(newMember: GuildMember) {
 		if (DEBUG_LOG_ENABLED.UpdateNickname) {
 			if (newMember.nickname === null) {
-				console.log(`User id: ${newMember.id} Changed his nickname to ${newMember.user.username}`);
+				console.log(`User id: ${newMember.id} Changed to his default username: ${newMember.user.username}`);
 			} else {
 				console.log(`User id: ${newMember.id} Changed his nickname to ${newMember.nickname}`);
 			}
@@ -995,15 +1086,15 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 		}
 
 		if (type === "text") {
-			this.prisma.channel_text.update({ where: { channel_id: channelId }, data: { position: newPos } })
+			this.prisma.channel__text.update({ where: { channel_id: channelId }, data: { position: newPos } })
 		} else if (type === "voice") {
-			this.prisma.channel_voice.update({ where: { channel_id: channelId }, data: { position: newPos } })
+			this.prisma.channel__voice.update({ where: { channel_id: channelId }, data: { position: newPos } })
 		} else if (type === "category") {
-			this.prisma.channel_category.update({ where: { channel_id: channelId }, data: { position: newPos } })
+			this.prisma.channel__category.update({ where: { channel_id: channelId }, data: { position: newPos } })
 		} else if (type === "news") {
-			this.prisma.channel_news.update({ where: { channel_id: channelId }, data: { position: newPos } })
+			this.prisma.channel__news.update({ where: { channel_id: channelId }, data: { position: newPos } })
 		} else if (type === "store") {
-			this.prisma.channel_store.update({ where: { channel_id: channelId }, data: { position: newPos } })
+			this.prisma.channel__store.update({ where: { channel_id: channelId }, data: { position: newPos } })
 		}
 	}
 
@@ -1013,15 +1104,15 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 		}
 
 		if (type === "text") {
-			this.prisma.channel_text.update({ where: { channel_id: channelId }, data: { name: name } })
+			this.prisma.channel__text.update({ where: { channel_id: channelId }, data: { name: name } })
 		} else if (type === "voice") {
-			this.prisma.channel_voice.update({ where: { channel_id: channelId }, data: { name: name } })
+			this.prisma.channel__voice.update({ where: { channel_id: channelId }, data: { name: name } })
 		} else if (type === "category") {
-			this.prisma.channel_category.update({ where: { channel_id: channelId }, data: { name: name } })
+			this.prisma.channel__category.update({ where: { channel_id: channelId }, data: { name: name } })
 		} else if (type === "news") {
-			this.prisma.channel_news.update({ where: { channel_id: channelId }, data: { name: name } })
+			this.prisma.channel__news.update({ where: { channel_id: channelId }, data: { name: name } })
 		} else if (type === "store") {
-			this.prisma.channel_store.update({ where: { channel_id: channelId }, data: { name: name } })
+			this.prisma.channel__store.update({ where: { channel_id: channelId }, data: { name: name } })
 		}
 	}
 
@@ -1038,6 +1129,18 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 
 export default DB;
 
+
+interface ChannelMessage {
+	id: string,
+	content: string,
+	author: string,
+	type: string,
+	embeds?: string,
+	attachments?: string,
+	channel_id: string,
+	is_pinned: boolean,
+	is_deleted: boolean
+}
 interface channel_messages_deleted {
 	message_id: string,
 	executor: string,
@@ -1068,8 +1171,12 @@ interface UserToRoleInterface {
 export interface ChannelRolePermissions {
 	channel_id: string,
 	role_id: string,
+	type: "member" | "role"
 	allow_bitfield: number,
 	deny_bitfield: number,
+	allow_changed?: boolean,
+	deny_changed?: boolean,
+	both_changed?: boolean,
 }
 
 export enum LogTypes {

@@ -88,6 +88,7 @@ function HandleAddingPermissions<T extends TextChannel | VoiceChannel | StoreCha
 				a.set(element.id, [{
 					allow_bitfield: permissionOverwrites.allow.bitfield,
 					channel_id: element.id,
+					type: permissionOverwrites.type,
 					deny_bitfield: permissionOverwrites.deny.bitfield,
 					role_id: permissionOverwrites.id
 				}])
@@ -95,6 +96,7 @@ function HandleAddingPermissions<T extends TextChannel | VoiceChannel | StoreCha
 				a.get(element.id)?.push({
 					allow_bitfield: permissionOverwrites.allow.bitfield,
 					channel_id: element.id,
+					type: permissionOverwrites.type,
 					deny_bitfield: permissionOverwrites.deny.bitfield,
 					role_id: permissionOverwrites.id
 				})
@@ -106,73 +108,99 @@ function HandleAddingPermissions<T extends TextChannel | VoiceChannel | StoreCha
 }
 
 function HandleUpdatingPermissions<T extends TextChannel | VoiceChannel | StoreChannel | CategoryChannel | NewsChannel>
-(element: T, Roles: ChannelRolePermissions[], j: number, b:Map<string, ChannelRolePermissions[]>) {
+	(element: T, Roles: ChannelRolePermissions[], ToAdd: Map<string, ChannelRolePermissions[]>, ToUpdate: Map<string, ChannelRolePermissions[]>) {
+	let j = 0
+
+
 	element.permissionOverwrites.forEach((permissionOverwrites, key) => {
-		if (Roles[j]) {
+		let size = 0;
+		if (Roles[j].role_id === permissionOverwrites.id) {
 			// Update existing role
 			// We have the permission override role in our DB
 			if (permissionOverwrites.allow.bitfield === Roles[j].allow_bitfield) {
 			} else {
+				// Allow value changed
 				Roles[j].allow_bitfield = permissionOverwrites.allow.bitfield
-				if (b.has(element.id)) {
-					b.get(element.id)![j] = {
+				if (ToUpdate.has(element.id)) {
+					Object.assign(ToUpdate.get(element.id)![j],	{
 						allow_bitfield: permissionOverwrites.allow.bitfield,
 						channel_id: element.id,
+						type: permissionOverwrites.type,
 						deny_bitfield: permissionOverwrites.deny.bitfield,
-						role_id: permissionOverwrites.id
-					};
+						role_id: permissionOverwrites.id,
+						allow_changed: true
+					})
 
 				} else {
-					b.set(element.id, [{
+					size = ToUpdate.set(element.id, [{
 						allow_bitfield: permissionOverwrites.allow.bitfield,
 						channel_id: element.id,
+						type: permissionOverwrites.type,
 						deny_bitfield: permissionOverwrites.deny.bitfield,
-						role_id: permissionOverwrites.id
-					}])
+						role_id: permissionOverwrites.id,
+						allow_changed: true
+					}]).size
+				}
+
+				const a = ToUpdate.get(element.id)![size - 1];
+				if (a.allow_changed === true && a.deny_changed === true) {
+					a.both_changed = true
 				}
 			}
-	
+
 			if (permissionOverwrites.deny.bitfield === Roles[j].deny_bitfield) {
-	
+
 			} else {
+				// Deny value changed
 				Roles[j].deny_bitfield = permissionOverwrites.deny.bitfield
-				if (b.has(element.id)) {
-					b.get(element.id)![j] = {
+				if (ToUpdate.has(element.id)) {
+					Object.assign(ToUpdate.get(element.id)![j],	{
 						allow_bitfield: permissionOverwrites.allow.bitfield,
 						channel_id: element.id,
+						type: permissionOverwrites.type,
 						deny_bitfield: permissionOverwrites.deny.bitfield,
-						role_id: permissionOverwrites.id
-					};
+						role_id: permissionOverwrites.id,
+						deny_changed: true
+					})
+
 				} else {
-					b.set(element.id, [{
+					size = ToUpdate.set(element.id, [{
 						allow_bitfield: permissionOverwrites.allow.bitfield,
 						channel_id: element.id,
+						type: permissionOverwrites.type,
 						deny_bitfield: permissionOverwrites.deny.bitfield,
-						role_id: permissionOverwrites.id
-					}])
+						role_id: permissionOverwrites.id,
+						deny_changed: true
+					}]).size
+				}
+				const a = ToUpdate.get(element.id)![size - 1];
+				if (a.allow_changed === true && a.deny_changed === true) {
+					a.both_changed = true
 				}
 			}
-			
+
+			delete Roles[j]
+
 		} else {
 			// Add a role that is not present in our DB
-			if (b.has(element.id)) {
-				b.get(element.id)![j] = {
+			if (ToAdd.has(element.id)) {
+				ToAdd.get(element.id)![j] = {
 					allow_bitfield: permissionOverwrites.allow.bitfield,
 					channel_id: element.id,
+					type: permissionOverwrites.type,
 					deny_bitfield: permissionOverwrites.deny.bitfield,
 					role_id: permissionOverwrites.id
 				};
 			} else {
-				b.set(element.id, [{
+				ToAdd.set(element.id, [{
 					allow_bitfield: permissionOverwrites.allow.bitfield,
 					channel_id: element.id,
+					type: permissionOverwrites.type,
 					deny_bitfield: permissionOverwrites.deny.bitfield,
 					role_id: permissionOverwrites.id
 				}])
 			}
 		}
-
-		delete Roles[j]
 
 		j++;
 	})
@@ -188,8 +216,9 @@ async function handleChannelRoles(): Promise<void> {
 	const ChannelPermissions = await database.GetChannelPermissions();
 
 	let a = new Map<string, ChannelRolePermissions[]>();
-	const PermissionsToAddUpdate = new Map<string, ChannelRolePermissions[]>();
-	const PermissionsToRemove: {channel_id: string, role_id: string}[]  = [];
+	const PermissionsToAdd = new Map<string, ChannelRolePermissions[]>();
+	const PermissionsToUpdate = new Map<string, ChannelRolePermissions[]>();
+	const PermissionsToRemove: { channel_id: string, role_id: string, deny: number, allow: number }[] = [];
 
 	ChannelPermissions.forEach((element) => {
 		if (!a.has(element.channel_id)) {
@@ -200,7 +229,6 @@ async function handleChannelRoles(): Promise<void> {
 	})
 
 	client.channels.cache.forEach((element) => {
-		let j = 0
 		let RoleArr = a.get(element.id)!
 		// TODO: instanceof check are redundant?
 		if (RoleArr === undefined) {
@@ -208,59 +236,61 @@ async function handleChannelRoles(): Promise<void> {
 			// We don't have associated that channel with ANY roles
 			// If the channel doesn't have permission overrides we assume its (0,0) for @everyone
 			if (element instanceof TextChannel) {
-				HandleAddingPermissions(element, PermissionsToAddUpdate);
+				HandleAddingPermissions(element, PermissionsToAdd);
 			}
 			else if (element instanceof VoiceChannel) {
-				HandleAddingPermissions(element, PermissionsToAddUpdate);
+				HandleAddingPermissions(element, PermissionsToAdd);
 			}
 			else if (element instanceof CategoryChannel) {
-				HandleAddingPermissions(element, PermissionsToAddUpdate);
+				HandleAddingPermissions(element, PermissionsToAdd);
 			}
 			else if (element instanceof StoreChannel) {
-				HandleAddingPermissions(element, PermissionsToAddUpdate);
+				HandleAddingPermissions(element, PermissionsToAdd);
 			}
 			else if (element instanceof NewsChannel) {
-				HandleAddingPermissions(element, PermissionsToAddUpdate);
+				HandleAddingPermissions(element, PermissionsToAdd);
 			}
 		} else {
 			// We have a channel with AT LEAST 1 role
 
 			if (element instanceof TextChannel) {
-				HandleUpdatingPermissions(element, RoleArr, j, PermissionsToAddUpdate);
+				HandleUpdatingPermissions(element, RoleArr, PermissionsToAdd, PermissionsToUpdate);
 			}
 			else if (element instanceof VoiceChannel) {
-				HandleUpdatingPermissions(element, RoleArr, j, PermissionsToAddUpdate);
+				HandleUpdatingPermissions(element, RoleArr, PermissionsToAdd, PermissionsToUpdate);
 			}
 			else if (element instanceof CategoryChannel) {
-				HandleUpdatingPermissions(element, RoleArr, j, PermissionsToAddUpdate);
+				HandleUpdatingPermissions(element, RoleArr, PermissionsToAdd, PermissionsToUpdate);
 			}
 			else if (element instanceof StoreChannel) {
-				HandleUpdatingPermissions(element, RoleArr, j, PermissionsToAddUpdate);
+				HandleUpdatingPermissions(element, RoleArr, PermissionsToAdd, PermissionsToUpdate);
 			}
 			else if (element instanceof NewsChannel) {
-				HandleUpdatingPermissions(element, RoleArr, j, PermissionsToAddUpdate);
+				HandleUpdatingPermissions(element, RoleArr, PermissionsToAdd, PermissionsToUpdate);
 			}
 			// DM channel has no permissions 
 			// else if (element instanceof DMChannel) {
-	
+
 			// }
 
 			// Go through all elements and check what's left
 			// The remaining elements need to be deleted from the DB
 			RoleArr.forEach((element, key) => {
 				if (element) {
-					PermissionsToRemove.push({channel_id: element.channel_id, role_id: element.role_id});
+					PermissionsToRemove.push({ channel_id: element.channel_id, role_id: element.role_id, deny: element.deny_bitfield, allow: element.allow_bitfield });
 				}
 			})
-		}
-		j = 0;
+		} a
 	})
 
 	if (PermissionsToRemove.length > 0) {
 		await database.RemovePermissionFromChannel(PermissionsToRemove);
 	}
-	if (PermissionsToAddUpdate.size > 0) {
-		await database.AddUpdatePermissions(PermissionsToAddUpdate);		
+	if (PermissionsToUpdate.size > 0) {
+		await database.UpdateChannelPermissions1(PermissionsToUpdate);
+	}
+	if (PermissionsToAdd.size > 0) {
+		await database.AddChannelPermissions(PermissionsToAdd);
 	}
 
 }
@@ -340,6 +370,7 @@ client.on("ready", async () => {
 	performance.measure("Init Operations done", "a", "b");
 	// await database.dummy(client.channels.cache.first()!)
 	database.AddLog(`Logged in as ${client.user!.tag}!`, LogTypes.general_log);
+
 });
 
 client.on("channelDelete", (channel) => {
@@ -352,30 +383,7 @@ client.on("channelDelete", (channel) => {
 // This event is unreliable with a DM channel. It creates a race condition with on."message" 
 // which always finishes first for the first message sent
 client.on("channelCreate", async (channel) => {
-	// if (channel instanceof DMChannel) {
-	// 	// Unreliable
-	// } 
-	// TODO: fix checking for channel type here and in the db function
-	if (channel instanceof TextChannel) {
-		database.AddChannels([channel]);
-	}
-	else if (channel instanceof VoiceChannel) {
-		database.AddChannels([channel]);
-	}
-	else if (channel instanceof CategoryChannel) {
-		database.AddChannels([channel]);
-	}
-	else if (channel instanceof StoreChannel) {
-		database.AddChannels([channel]);
-	}
-	else if (channel instanceof NewsChannel) {
-		database.AddChannels([channel]);
-	}
-	else if (channel instanceof DMChannel) {
-		//database.AddChannels([channel]);
-	}
-
-
+	database.AddChannels([channel])
 
 	await database.AddLog(`Text Channel Created: ${channel.type}`, LogTypes.channel);
 });
@@ -448,11 +456,10 @@ client.on("channelUpdate", (oldChannel, newChannel) => {
 PARAMETER    TYPE         DESCRIPTION
 channel      Channel      The channel that the pins update occurred in
 time         Date         The time of the pins update    */
-client.on("channelPinsUpdate", (channel, time) => {
-	console.log(`channelPinsUpdate: ${channel}:${time}`);
-});
-
-
+// Seems pretty useless .on("messageUpdate") provides much more info
+// client.on("channelPinsUpdate", (channel, time) => {
+// 	console.log(`channelPinsUpdate: ${channel}:${time}`);
+// });
 
 // debug
 /* Emitted for general debugging information.
@@ -680,6 +687,7 @@ message        Message        The deleted message    */
 // Uses PartialMessage otherwise it won't fire for non-cached messages
 client.on("messageDelete", async (message) => {
 	console.log(`message is deleted -> ${message.id}`);
+
 	// Ignore DM deletions
 	if (!message.guild) {
 		database.DeleteMessage(message as PartialMessage);
@@ -782,8 +790,29 @@ client.on("messageReactionRemoveAll", (message) => {
 PARAMETER     TYPE           DESCRIPTION
 oldMessage    Message        The message before the update
 newMessage    Message        The message after the update    */
-client.on("messageUpdate", (oldMessage, newMessage) => {
-	console.log(`a message is updated`);
+client.on("messageUpdate", async (oldMessage, newMessage) => {
+	if (oldMessage.content === null) {
+		// Updating messages that are not cached do not generate any data(expect ID) for oldMessage
+		// Try to find the message in our DB then try to fetch it
+		const DBMessage = await database.GetMessage(newMessage.id);
+		if (!DBMessage[0]) {
+			// We don't have that message in our DB
+			// fetch it from Discord
+			oldMessage = await oldMessage.fetch();
+			// Add it to the DB
+			await database.AddMessage(oldMessage);
+		}
+	}
+	if (oldMessage.content !== newMessage.content) {
+		// Content was changed
+	} else if (oldMessage.pinned !== newMessage.pinned) {
+		// Message was pinned/unpinned
+		if (newMessage.pinned) {
+			// Pinned
+		} else {
+			// Unpinned
+		}
+	}
 });
 
 // presenceUpdate
@@ -905,14 +934,21 @@ client.on("message", async (msg) => {
 		msg.reply("Some placeholder functionality");
 		return;
 	}
-	// console.log('Raw message', msg)
-	if (msg.channel.type === "text") {
+	if (msg.type === "DEFAULT") {
 		database.AddMessage(msg);
 		// send the message to all clients
 		WebSocket.send(msg.content);
 
 		return;
+	} else if (msg.type === "PINS_ADD") {
+		database.UpdateChannelPins(msg);
+	} else {
+		ctx.redBright(`Unimplemented type`)
+		throw new Error(`"Method not implemented. Type: ${msg.type}"`);
 	}
+
+	return
+
 });
 
 
