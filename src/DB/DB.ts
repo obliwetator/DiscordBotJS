@@ -55,6 +55,13 @@ export const DEBUG_LOG_ENABLED = {
 }
 
 class DB {
+	public async UpdateMessage(DBMessage: ChannelMessage, newMessage: Message) {
+		// Id, Author, ChannelId and is_deleted CANNOT be changed
+		let UpdateMessage = `UPDATE channel_messages SET content = '${newMessage.content}', is_pinned = ${newMessage.pinned ? 1 : 0}, is_edited = 1 WHERE id = '${newMessage.id}';`
+		let UpdateMessageLog = `INSERT INTO log__channel_messages (message_id, og_message) VALUES ('${newMessage.id}', '${DBMessage.content}');`
+
+		await this.GetQuery(UpdateMessage + UpdateMessageLog)
+	}
 	// TODO: Rename
 
 	public async GetMessage(id: string): Promise<ChannelMessage[]> {
@@ -214,7 +221,6 @@ class DB {
 			})
 		} else if (permissionOverwritesOld.size < permissionOverwritesNew.size) {
 			// Role was added
-			console.log('Role Added')
 			permissionOverwritesNew.forEach(async (element, key) => {
 				AllowDiff = false
 				DenyDiff = false
@@ -566,11 +572,8 @@ VALUES ('${message.id}','${message.embeds[0].title}', '${message.embeds[0].type}
 		}
 		await this.GetQuery(
 			`${EmbededQuery}${AttachmentQuery}\
-INSERT IGNORE INTO users (id, username, discriminator, bot)\
-VALUES ('${message.author.id}', '${message.author.username}', '${message.author.discriminator}', ${message.author.bot ? 1 : 0});\
 INSERT INTO channel_messages (id, content, author, type, embeds, attachments, channel_id, is_pinned)\
-VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.author.id}', '${message.type}', ${hasEmbed ? `${message.id}` : "NULL"}, ${hasAttachment ? `${message.attachments.first()?.id}` : "NULL"}, '${message.channel.id}', ${message.pinned ? 1 : 0});`)
-			;
+VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.author.id}', '${message.type}', ${hasEmbed ? `${message.id}` : "NULL"}, ${hasAttachment ? `${message.attachments.first()?.id}` : "NULL"}, '${message.channel.id}', ${message.pinned ? 1 : 0});`);
 	}
 	/**
 	 * Every DM is unique between the bot and the recepient.\
