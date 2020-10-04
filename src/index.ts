@@ -1,6 +1,6 @@
 import { token } from "./Config";
 import DB, { ChannelRolePermissions, LogTypes } from "./DB/DB";
-import { Channel, Client, Collection, TextChannel, PartialMessage, GuildMember, Role, DMChannel, GuildChannel, VoiceChannel, CategoryChannel, NewsChannel, StoreChannel } from "discord.js";
+import { Channel, Client, Collection, TextChannel, PartialMessage, GuildMember, Role, DMChannel, GuildChannel, VoiceChannel, CategoryChannel, NewsChannel, StoreChannel, Message } from "discord.js";
 import { HandleVoiceState, EnumVoiceState } from "./HandleVoiceState";
 
 import { PerformanceObserver, performance } from 'perf_hooks';
@@ -366,8 +366,8 @@ client.on("ready", async () => {
 	await handleChannelRoles();
 	// await database.dummy(client.channels.cache.first()!);
 	performance.mark("b");
-
 	performance.measure("Init Operations done", "a", "b");
+
 	// await database.dummy(client.channels.cache.first()!)
 	database.AddLog(`Logged in as ${client.user!.tag}!`, LogTypes.general_log);
 
@@ -401,21 +401,17 @@ client.on("channelUpdate", (oldChannel, newChannel) => {
 			// Channel was moved in the guild hierarchy
 			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition, newChannel.type);
 		} else if (oldChannel.name !== newChannel.name) {
-			database.UpdateChannelname(newChannel.id, newChannel.name, newChannel.type);
+			database.UpdateChannelName(newChannel.id, newChannel.name, newChannel.type);
 		} else if (oldChannel.permissionOverwrites !== newChannel.permissionOverwrites) {
-			database.UpdateChannelPermissions(newChannel.id, oldChannel.permissionOverwrites, newChannel.permissionOverwrites)
 			// permissionOverwrites is a Map with the roles that are being filtered
 			// There will always be the @everyone role
-			// unimplemented
+			database.UpdateChannelPermissions(newChannel.id, oldChannel.permissionOverwrites, newChannel.permissionOverwrites)
 		} else if (oldChannel.topic !== newChannel.topic) {
 			database.UpdateTextChannelTopic(newChannel.id, newChannel.topic)
-			// unimplemented
 		} else if (oldChannel.rateLimitPerUser !== newChannel.rateLimitPerUser) {
 			database.UpdateTextChannelRateLimit(newChannel.id, newChannel.rateLimitPerUser)
-			// unimplemented
 		} else if (oldChannel.nsfw !== newChannel.nsfw) {
 			database.UpdateTextChannelNsfw(newChannel.id, newChannel.nsfw);
-			// unimplemented
 		}
 
 	} else if (oldChannel instanceof VoiceChannel && newChannel instanceof VoiceChannel) {
@@ -789,21 +785,32 @@ client.on("messageReactionRemoveAll", (message) => {
 /* Emitted whenever a message is updated - e.g. embed or content change.
 PARAMETER     TYPE           DESCRIPTION
 oldMessage    Message        The message before the update
-newMessage    Message        The message after the update    */
+newMessage    Message        The message after the update   
+Realisticallty only the message content will be changed by a user.
+Bots can eddit embeds and attachments but that wont be supported(?)
+*/
 client.on("messageUpdate", async (oldMessage, newMessage) => {
 	if (oldMessage.content === null) {
 		// Updating messages that are not cached do not generate any data(expect ID) for oldMessage
-		// Try to find the message in our DB then try to fetch it
+		// Try to find the message in our DB
 		const DBMessage = await database.GetMessage(newMessage.id);
 		if (!DBMessage[0]) {
+			// There is a very high possiblity that no fields will be returned
+			// TODO: There is a possibility the user was not recorded when the message was sent
+			// AND that user is no longer in the channel(and) causing an error
+			if (!newMessage.author) 
+				newMessage = await newMessage.fetch()
+
 			// We don't have that message in our DB
-			// fetch it from Discord
-			oldMessage = await oldMessage.fetch();
-			// Add it to the DB
-			await database.AddMessage(oldMessage);
+			// Add the new message(edit) as is.
+			database.AddMessage(newMessage as Message);
+		} else {
+			// we have the message. Update it and add a log
+			database.UpdateMessage(DBMessage[0], newMessage as Message);
 		}
 	}
 	if (oldMessage.content !== newMessage.content) {
+		database.UpdateMessageAPI(oldMessage as Message, newMessage as Message);
 		// Content was changed
 	} else if (oldMessage.pinned !== newMessage.pinned) {
 		// Message was pinned/unpinned

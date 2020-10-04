@@ -58,11 +58,17 @@ class DB {
 	public async UpdateMessage(DBMessage: ChannelMessage, newMessage: Message) {
 		// Id, Author, ChannelId and is_deleted CANNOT be changed
 		let UpdateMessage = `UPDATE channel_messages SET content = '${newMessage.content}', is_pinned = ${newMessage.pinned ? 1 : 0}, is_edited = 1 WHERE id = '${newMessage.id}';`
-		let UpdateMessageLog = `INSERT INTO log__channel_messages (message_id, og_message) VALUES ('${newMessage.id}', '${DBMessage.content}');`
+		let UpdateMessageLog = `INSERT INTO log__channel_messages (message_id, type, og_message) VALUES ('${newMessage.id}', 'edit', '${DBMessage.content}');`
 
 		await this.GetQuery(UpdateMessage + UpdateMessageLog)
 	}
-	// TODO: Rename
+	public async UpdateMessageAPI(DBMessage: Message, newMessage: Message) {
+		// Id, Author, ChannelId and is_deleted CANNOT be changed
+		let UpdateMessage = `UPDATE channel_messages SET content = '${newMessage.content}', is_pinned = ${newMessage.pinned ? 1 : 0}, is_edited = 1 WHERE id = '${newMessage.id}';`
+		let UpdateMessageLog = `INSERT INTO log__channel_messages (message_id, type, og_message) VALUES ('${newMessage.id}', 'edit', '${DBMessage.content}');`
+
+		await this.GetQuery(UpdateMessage + UpdateMessageLog)
+	}
 
 	public async GetMessage(id: string): Promise<ChannelMessage[]> {
 		const sql = `SELECT * FROM channel_messages WHERE id = '${id}'`
@@ -75,6 +81,8 @@ class DB {
 		await this.GetQuery(sql);
 	}
 	// TODO: Add executor
+	// TODO: Rename
+
 	public async UpdateChannelPermissions1(PermissionsToUpdate: Map<string, ChannelRolePermissions[]>) {
 		let query = "INSERT INTO channel_permissions (channel_id, role_id, type, allow_bitfield, deny_bitfield) VALUES"
 		let dup = "ON DUPLICATE KEY UPDATE allow_bitfield = VALUES(allow_bitfield) , deny_bitfield = VALUES(deny_bitfield)"
@@ -203,7 +211,7 @@ class DB {
 		let UpdateDenyIndex = 1
 
 		// TODO: Add executor
-		let executor:string; //temp
+		let executor: string; //temp
 
 		let Update: [number, string][] = [[0, "NULL"], [0, "NULL"]];
 
@@ -276,10 +284,10 @@ class DB {
 				}
 
 				const NewUpdate = permissionOverwritesNew.get(key)!
-				
+
 				let AddLog = `INSERT INTO log__channel_permissions (role_id, channel_id, executor, type, og_allow, og_deny) VALUES ('${OldElement.id}', '${channelId}', NULL, '${type}', ${Update[0][UpdateAllowIndex]}, ${Update[1][UpdateDenyIndex]});`
 				let a = `UPDATE channel_permissions SET allow_bitfield = ${OldElement.allow.bitfield !== NewUpdate.allow.bitfield ? NewUpdate.allow.bitfield : "allow_bitfield"}, deny_bitfield = ${OldElement.deny.bitfield !== NewUpdate.deny.bitfield ? NewUpdate.deny.bitfield : "deny_bitfield"} WHERE channel_id = '${channelId}' AND role_id = '${OldElement.id}'`
-				 await this.GetQuery(a + ";" + AddLog)
+				await this.GetQuery(a + ";" + AddLog)
 			});
 		}
 
@@ -573,7 +581,7 @@ VALUES ('${message.id}','${message.embeds[0].title}', '${message.embeds[0].type}
 		await this.GetQuery(
 			`${EmbededQuery}${AttachmentQuery}\
 INSERT INTO channel_messages (id, content, author, type, embeds, attachments, channel_id, is_pinned)\
-VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.author.id}', '${message.type}', ${hasEmbed ? `${message.id}` : "NULL"}, ${hasAttachment ? `${message.attachments.first()?.id}` : "NULL"}, '${message.channel.id}', ${message.pinned ? 1 : 0});`);
+VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author.id}', '${message.type}', ${hasEmbed ? `${message.id}` : "NULL"}, ${hasAttachment ? `${message.attachments.first()?.id}` : "NULL"}, '${message.channel.id}', ${message.pinned ? 1 : 0});`);
 	}
 	/**
 	 * Every DM is unique between the bot and the recepient.\
@@ -985,8 +993,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 		if (DEBUG_LOG_ENABLED.DeleteMessage) {
 			console.log("Message Deleted =>", msg);
 		}
-		// Updates exisiting message or adds a new entry with the three properties provided
-		// ID          CHANNEL_ID         TYPE
+		// Updates exisiting message or adds a new entry with the three properties provided and insert a log entry
 		const DeleteProcedure = `CALL delete_message('${msg.id}', '${msg.channel.id}', 'UNKOWN')`;
 
 		// const UpdateDeleteMessageQuery = `UPDATE channel_messages SET is_deleted=1 WHERE id = '${msg.id}';`;
@@ -1011,19 +1018,19 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 	*Partial messages only guarantees the id\
 	*When deleting messages we only care about the deleted message and we don't need the rest of information
 	*/
-	public async DeleteMessages(msgs: Collection<string, PartialMessage>) {
+	// TODO: Executor
+	public async DeleteMessages(msgs: Collection<string, PartialMessage>, executor: string | null = null) {
 		if (DEBUG_LOG_ENABLED.DeleteMessageBulk) {
 			msgs.forEach((element) => {
 				console.log("Message Deleted =>", element);
 			})
 		}
 		let DeleteMessagesQuery = "UPDATE channel_messages SET is_deleted=1 WHERE id IN (";
-		let DeleteMessageQuery = `INSERT INTO channel_messages_deleted (message_id, deleted_at) VALUES `;
-		const CurrentTimestamp = Date.now();
+		let DeleteMessageQuery = `INSERT INTO log__channel_messages (message_id, type) VALUES `;
 
 		msgs.forEach((_value, key) => {
 			DeleteMessagesQuery += key + ',';
-			DeleteMessageQuery += `('${key}' , '${CurrentTimestamp}'),`
+			DeleteMessageQuery += `('${key}' , 'remove'),`
 		})
 		DeleteMessagesQuery = DeleteMessagesQuery.slice(0, -1) + ");";
 		DeleteMessageQuery = DeleteMessageQuery.slice(0, -1) + ";";
@@ -1056,7 +1063,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 			console.log(`State: ${EnumVoiceState[VoiceState]}, User: ${UserId}, Channel: ${ChannelId}`)
 		}
 
-		const VoiceStateQuery = `INSERT INTO voice_states (user_id, channel_id, category, executor) VALUES ('${UserId}', '${ChannelId}', '${VoiceState}', ${Executor.length > 0 ? `${Executor}` : "NULL"});`
+		const VoiceStateQuery = `INSERT INTO log__voice_states (user_id, channel_id, category, executor) VALUES ('${UserId}', '${ChannelId}', '${VoiceState}', ${Executor.length > 0 ? `${Executor}` : "NULL"});`
 
 		this.GetQuery(VoiceStateQuery);
 	}
@@ -1089,33 +1096,33 @@ VALUES ('${message.id}', ${this.pool.escape(message.content,)}, '${message.autho
 		}
 
 		if (type === "text") {
-			this.prisma.channel__text.update({ where: { channel_id: channelId }, data: { position: newPos } })
+			await this.prisma.channel__text.update({ where: { channel_id: channelId }, data: { position: newPos } })
 		} else if (type === "voice") {
-			this.prisma.channel__voice.update({ where: { channel_id: channelId }, data: { position: newPos } })
+			await this.prisma.channel__voice.update({ where: { channel_id: channelId }, data: { position: newPos } })
 		} else if (type === "category") {
-			this.prisma.channel__category.update({ where: { channel_id: channelId }, data: { position: newPos } })
+			await this.prisma.channel__category.update({ where: { channel_id: channelId }, data: { position: newPos } })
 		} else if (type === "news") {
-			this.prisma.channel__news.update({ where: { channel_id: channelId }, data: { position: newPos } })
+			await this.prisma.channel__news.update({ where: { channel_id: channelId }, data: { position: newPos } })
 		} else if (type === "store") {
-			this.prisma.channel__store.update({ where: { channel_id: channelId }, data: { position: newPos } })
+			await this.prisma.channel__store.update({ where: { channel_id: channelId }, data: { position: newPos } })
 		}
 	}
 
-	public async UpdateChannelname(channelId: string, name: string, type: "text" | "dm" | "voice" | "group" | "category" | "news" | "store" | "unknown") {
+	public async UpdateChannelName(channelId: string, name: string, type: "text" | "dm" | "voice" | "group" | "category" | "news" | "store" | "unknown") {
 		if (DEBUG_LOG_ENABLED.ChannelUpdate.name) {
 			console.log(`New Channel name => ${name} for channel: ${channelId}`)
 		}
 
 		if (type === "text") {
-			this.prisma.channel__text.update({ where: { channel_id: channelId }, data: { name: name } })
+			await this.prisma.channel__text.update({ where: { channel_id: channelId }, data: { name: name } })
 		} else if (type === "voice") {
-			this.prisma.channel__voice.update({ where: { channel_id: channelId }, data: { name: name } })
+			await this.prisma.channel__voice.update({ where: { channel_id: channelId }, data: { name: name } })
 		} else if (type === "category") {
-			this.prisma.channel__category.update({ where: { channel_id: channelId }, data: { name: name } })
+			await this.prisma.channel__category.update({ where: { channel_id: channelId }, data: { name: name } })
 		} else if (type === "news") {
-			this.prisma.channel__news.update({ where: { channel_id: channelId }, data: { name: name } })
+			await this.prisma.channel__news.update({ where: { channel_id: channelId }, data: { name: name } })
 		} else if (type === "store") {
-			this.prisma.channel__store.update({ where: { channel_id: channelId }, data: { name: name } })
+			await this.prisma.channel__store.update({ where: { channel_id: channelId }, data: { name: name } })
 		}
 	}
 
