@@ -396,6 +396,8 @@ oldChannel       Channel     The channel before the update
 newChannel       Channel     The channel after the update    */
 client.on("channelUpdate", (oldChannel, newChannel) => {
 	// TODO: remove redudant check for one of the channels as both are guaranteed to be of the same type.
+
+	// TEXT
 	if (oldChannel instanceof TextChannel && newChannel instanceof TextChannel) {
 		if (oldChannel.rawPosition !== newChannel.rawPosition) {
 			// Channel was moved in the guild hierarchy
@@ -413,33 +415,46 @@ client.on("channelUpdate", (oldChannel, newChannel) => {
 		} else if (oldChannel.nsfw !== newChannel.nsfw) {
 			database.UpdateTextChannelNsfw(newChannel.id, newChannel.nsfw);
 		}
-
+		// VOICE
 	} else if (oldChannel instanceof VoiceChannel && newChannel instanceof VoiceChannel) {
 		if (oldChannel.rawPosition !== newChannel.rawPosition) {
 			// Channel was moved in the guild hierarchy
 			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition, newChannel.type);
+		} else if (oldChannel.name !== newChannel.name) {
+			database.UpdateChannelName(newChannel.id, newChannel.name, "voice")
+		} else if (oldChannel.bitrate !== newChannel.bitrate) {
+			database.UpdateVoiceChannelBitrate(newChannel)
+		} else if (oldChannel.userLimit !== newChannel.userLimit) {
+			database.UpdateVoiceChannelUserLimit(newChannel)
 		}
-
+		// CATEGORY
 	} else if (oldChannel instanceof CategoryChannel && newChannel instanceof CategoryChannel) {
 		if (oldChannel.rawPosition !== newChannel.rawPosition) {
 			// Channel was moved in the guild hierarchy
 			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition, newChannel.type);
+		} else if (oldChannel.name !== newChannel.name) {
+			database.UpdateChannelName(newChannel.id, newChannel.name, "category")
 		}
-
+		// DM
 	} else if (oldChannel instanceof DMChannel && newChannel instanceof DMChannel) {
 		database.AddLog(`DM channel update + ${newChannel.toJSON()}`, LogTypes.channel)
-		newChannel.recipient;
 
+		// STORE
 	} else if (oldChannel instanceof StoreChannel && newChannel instanceof StoreChannel) {
 		if (oldChannel.rawPosition !== newChannel.rawPosition) {
 			// Channel was moved in the guild hierarchy
 			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition, newChannel.type);
+		} else if (oldChannel.name !== newChannel.name) {
+			database.UpdateChannelName(newChannel.id, newChannel.name, "store")
 		}
 
+		// NEWS
 	} else if (oldChannel instanceof NewsChannel && newChannel instanceof NewsChannel) {
 		if (oldChannel.rawPosition !== newChannel.rawPosition) {
 			// Channel was moved in the guild hierarchy
 			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition, newChannel.type);
+		} else if (oldChannel.name !== newChannel.name) {
+			database.UpdateChannelName(newChannel.id, newChannel.name, "news")
 		}
 
 	} else {

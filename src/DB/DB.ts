@@ -55,6 +55,16 @@ export const DEBUG_LOG_ENABLED = {
 }
 
 class DB {
+	public async UpdateVoiceChannelUserLimit(newChannel: VoiceChannel) {
+		let sql = `UPDATE channel__voice SET user_limit = ${newChannel.userLimit} WHERE channel_id = '${newChannel.id}';`
+
+		this.GetQuery(sql);
+	}
+	public async UpdateVoiceChannelBitrate(newChannel: VoiceChannel) {
+		let sql = `UPDATE channel__voice SET bitrate = '${newChannel.bitrate}' WHERE channel_id = '${newChannel.id}';`
+
+		this.GetQuery(sql);
+	}
 	public async UpdateMessage(DBMessage: ChannelMessage, newMessage: Message) {
 		// Id, Author, ChannelId and is_deleted CANNOT be changed
 		let UpdateMessage = `UPDATE channel_messages SET content = '${newMessage.content}', is_pinned = ${newMessage.pinned ? 1 : 0}, is_edited = 1 WHERE id = '${newMessage.id}';`
@@ -627,7 +637,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 				})
 
 				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
-				InsertChannelQuery += `INSERT INTO channel__voice (channel_id, name, position) VALUES ('${element.id}', '${element.name}', '${element.position}');`
+				InsertChannelQuery += `INSERT INTO channel__voice (channel_id, name, bitrate, user_limit, position) VALUES ('${element.id}', '${element.name}', '${element.bitrate}', '${element.userLimit}', '${element.position}');`
 			}
 			else if (element instanceof CategoryChannel) {
 				element.permissionOverwrites.forEach((permission) => {
