@@ -13,7 +13,7 @@ import {
 	PartialMessage,
 	Role, DMChannel, StoreChannel, NewsChannel, Invite, PermissionOverwrites
 } from "discord.js";
-import { EnumVoiceState } from "../HandleVoiceState";
+
 
 import { PrismaClient } from "@prisma/client"
 import { performance, PerformanceObserver } from 'perf_hooks';
@@ -21,6 +21,7 @@ import { performance, PerformanceObserver } from 'perf_hooks';
 import { obs } from "../../timer"
 import chalk from "chalk";
 import { ctx } from "..";
+import { EnumVoiceState } from "../Bot/Voice";
 
 obs;
 

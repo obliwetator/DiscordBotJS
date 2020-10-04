@@ -1,5 +1,33 @@
-import { VoiceState, User } from "discord.js"
-import DB from "./DB/DB"
+
+import { client, database } from "..";
+import { User, VoiceState } from "discord.js";
+import DB from "../DB/DB";
+
+
+// voiceStateUpdate
+/* Emitted whenever a user changes voice state - e.g. joins/leaves a channel, mutes/unmutes.
+PARAMETER    TYPE             DESCRIPTION
+oldMember    GuildMember      The member before the voice state update
+newMember    GuildMember      The member after the voice state update    */
+client.on("voiceStateUpdate", async (oldState, newState) => {
+	// The only way for the properties to be undefined is either
+	// 1) the user to connect for the first time
+	// 2) the bot is connected after a user has joined ( not present in bot chache )
+
+	if (newState.channel !== null) {
+		// User is still present in the channel
+		// Check what was the action
+		if (oldState.channel === null) {
+			// User Joins a voice channel
+			database.AddVoiceState(EnumVoiceState.channel_join, newState.id, newState.channelID!)
+			return;
+		}
+		HandleVoiceState(oldState, newState, database);
+	} else if (newState.channel === null) {
+		// User leaves a voice channel
+		database.AddVoiceState(EnumVoiceState.channel_leave, newState.id, oldState.channelID!)
+	}
+});
 
 /**
  * Decides what was the action in the users voice state\
