@@ -11,7 +11,7 @@ import {
 	VoiceChannel,
 	GuildMember,
 	PartialMessage,
-	Role, DMChannel, StoreChannel, NewsChannel, Invite, PermissionOverwrites
+	Role, DMChannel, StoreChannel, NewsChannel, Invite, PermissionOverwrites, GuildEmoji
 } from "discord.js";
 
 
@@ -56,6 +56,33 @@ export const DEBUG_LOG_ENABLED = {
 }
 
 class DB {
+	AddEmoji(emoji: GuildEmoji) {
+		emoji
+	}
+	public async UpdateRole(oldRole: Role, newRole: Role) {
+		let query = ""
+
+		if (oldRole.permissions.bitfield !== newRole.permissions.bitfield) {
+			query = `UPDATE roles SET permissions = '${newRole.permissions.bitfield}' WHERE role_id = '${newRole.id}';`
+		} else if (oldRole.name !== newRole.name) {
+			query = `UPDATE roles SET name = '${newRole.name}' WHERE role_id = '${newRole.id}';`
+		} else if (oldRole.mentionable !== newRole.mentionable) {
+			query = `UPDATE roles SET mentionable = '${newRole.mentionable}' WHERE role_id = '${newRole.id}';`
+		} else if (oldRole.color !== newRole.color) {
+			query = `UPDATE roles SET hexColor = '${newRole.hexColor}' WHERE role_id = '${newRole.id}';`
+		} else if (oldRole.hoist !== newRole.hoist) {
+			query = `UPDATE roles SET hoist = '${newRole.hoist}' WHERE role_id = '${newRole.id}';`
+		} else if (oldRole.rawPosition !== newRole.rawPosition) {
+			query = `UPDATE roles SET rawPossition = '${newRole.rawPosition}' WHERE role_id = '${newRole.id}';`
+		} else if (oldRole.managed !== newRole.managed) {
+			query = `UPDATE roles SET managed = '${newRole.managed}' WHERE role_id = '${newRole.id}';`
+		} else {
+			// No modifiable value chanegd
+			return;
+		}
+
+		await this.GetQuery(query);
+	}
 	public async UpdateVoiceChannelUserLimit(newChannel: VoiceChannel) {
 		let sql = `UPDATE channel__voice SET user_limit = ${newChannel.userLimit} WHERE channel_id = '${newChannel.id}';`
 
@@ -697,11 +724,11 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 				console.log(`Role id: ${value.id} added`);
 			})
 		}
-		let InsertRoles = "INSERT INTO roles (role_id, name, hoist, rawPossition, managed, mentionable, permissions) VALUES";
+		let InsertRoles = "INSERT INTO roles (role_id, name, hexColor, hoist, rawPossition, managed, mentionable, permissions) VALUES";
 		let InsertRoleToGuild = "INSERT INTO roles_to_guild (role_id, guild_id) VALUES";
 
 		roles.forEach((element) => {
-			InsertRoles += `('${element.id}', '${element.name}', '${element.hoist ? 1 : 0}', '${element.rawPosition}', '${element.managed ? 1 : 0}', '${element.mentionable ? 1 : 0}', '${element.permissions.bitfield}'),`;
+			InsertRoles += `('${element.id}', '${element.name}', '${element.hexColor}', '${element.hoist ? 1 : 0}', '${element.rawPosition}', '${element.managed ? 1 : 0}', '${element.mentionable ? 1 : 0}', '${element.permissions.bitfield}'),`;
 
 			InsertRoleToGuild += `('${element.id}', '${this.GuildId}'),`;
 		})
