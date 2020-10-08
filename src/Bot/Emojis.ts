@@ -1,4 +1,4 @@
-import { client } from "..";
+import { client, database } from "..";
 
 
 // emojiCreate
@@ -6,7 +6,8 @@ import { client } from "..";
 PARAMETER    TYPE          DESCRIPTION
 emoji        Emoji         The emoji that was created    */
 client.on("emojiCreate", (emoji) => {
-	console.log(`a custom emoji is created in a guild`);
+		// TODO: Executor
+	database.AddEmoji(emoji);
 });
 
 // emojiDelete
@@ -14,7 +15,8 @@ client.on("emojiCreate", (emoji) => {
 PARAMETER    TYPE         DESCRIPTION
 emoji        Emoji        The emoji that was deleted    */
 client.on("emojiDelete", (emoji) => {
-	console.log(`a custom guild emoji is deleted`);
+	// TODO: Executor
+	database.RemoveEmoji(emoji.id)
 });
 
 // emojiUpdate
@@ -23,5 +25,7 @@ PARAMETER    TYPE       DESCRIPTION
 oldEmoji     Emoji      The old emoji
 newEmoji     Emoji      The new emoji    */
 client.on("emojiUpdate", (oldEmoji, newEmoji) => {
-	console.log(`a custom guild emoji is updated`);
+	// TODO: Executor
+	// They only thing that can be changed in emojis is the name(?)
+	database.UpdateEmojiName(newEmoji.id, newEmoji.name);
 });

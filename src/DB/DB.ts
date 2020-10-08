@@ -56,8 +56,21 @@ export const DEBUG_LOG_ENABLED = {
 }
 
 class DB {
-	AddEmoji(emoji: GuildEmoji) {
-		emoji
+	public async UpdateEmojiName(id: string, name: string) {
+		const UpdateEmoji = `UPDATE emojis SET name = '${name}' WHERE emoji_id = '${id}';`
+
+		await this.GetQuery(UpdateEmoji)
+	}
+	public async RemoveEmoji(id: string, executor: string | null = null) {
+		const RemoveEmoji = `UPDATE emojis SET is_deleted = '1' WHERE emoji_id = '${id}';`
+		const RemoveEmojiLog = `INSERT INTO log__emojis (emoji_id, executor, og_name, type) VALUES ('${id}', ${executor ? executor : "NULL"}, NULL, 'remove');`
+
+		await this.GetQuery(RemoveEmoji + RemoveEmojiLog);
+	}
+	public async AddEmoji(emoji: GuildEmoji, userId: string | null = null) {
+		let query = `INSERT INTO emojis (emoji_id, name, user_id, require_colons, managed, animated, available) VALUES ('${emoji.id}', '${emoji.name}', ${userId ? userId : "NULL"}, '${emoji.requiresColons}', '${emoji.managed}', '${emoji.animated}', '${emoji.available}');`
+
+		await this.GetQuery(query);
 	}
 	public async UpdateRole(oldRole: Role, newRole: Role) {
 		let query = ""
