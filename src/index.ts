@@ -1,25 +1,25 @@
 import { token } from "./Config";
 import { Channel, Client, TextChannel, Role, VoiceChannel, CategoryChannel, NewsChannel, StoreChannel, GuildMember } from "discord.js";
-export const client = new Client({ partials: ['MESSAGE'] });
+const client = new Client({ partials: ['MESSAGE'] });
 import DB, { ChannelRolePermissions, LogTypes } from "./DB/DB";
-export const database: DB = new DB();
+const database: DB = new DB();
 
 import { PerformanceObserver, performance } from 'perf_hooks';
 import { obs } from "../timer"
 
-import * as aaa from './Bot/Channels';
-import * as ccc from './Bot/Emojis'
-import * as ddd from './Bot/Guilds'
-import * as bbb from './Bot/Invites'
-import * as eee from './Bot/Messages'
-import * as fff from './Bot/Roles'
-import * as ggg from './Bot/Voice'
+import './Bot/Channels';
+import './Bot/Emojis'
+import './Bot/Guilds'
+import './Bot/Invites'
+import './Bot/Messages'
+import './Bot/Roles'
+import './Bot/Voice'
 
-aaa;ccc;ddd;bbb;eee;fff;ggg;
-
+export { client, database };
 obs;
 
 import chalk from "chalk";
+
 
 export const ctx = new chalk.Instance({ level: 3 });
 // process.on("exit", () => {
@@ -43,11 +43,10 @@ async function handleGuild(): Promise<void> {
 	const GuildKey = client.guilds.cache.firstKey();
 	database.GuildId = GuildKey!;
 	if (await database.FirstTimeInGuild(GuildKey!)) {
-		database.AddGuild(
-			client.guilds.cache.first()!);
+		database.AddGuild(client.guilds.cache.first()!);
 		console.log(`First time in ${client.guilds.cache.first()?.name}`)
 	}
-}
+} 
 
 async function handleChannels(): Promise<void> {
 	// Check if the chanels match up since last login
@@ -110,76 +109,112 @@ function HandleUpdatingPermissions<T extends TextChannel | VoiceChannel | StoreC
 
 
 	element.permissionOverwrites.forEach((permissionOverwrites, key) => {
-		let size = 0;
-		if (Roles[j].role_id === permissionOverwrites.id) {
-			// Update existing role
-			// We have the permission override role in our DB
-			if (permissionOverwrites.allow.bitfield === Roles[j].allow_bitfield) {
-			} else {
-				// Allow value changed
-				Roles[j].allow_bitfield = permissionOverwrites.allow.bitfield
-				if (ToUpdate.has(element.id)) {
-					Object.assign(ToUpdate.get(element.id)![j],	{
-						allow_bitfield: permissionOverwrites.allow.bitfield,
-						channel_id: element.id,
-						type: permissionOverwrites.type,
-						deny_bitfield: permissionOverwrites.deny.bitfield,
-						role_id: permissionOverwrites.id,
-						allow_changed: true
-					})
-
+		// There might be more roles in the server than the DB
+		if (Roles[j]) {
+			let size = 0;
+			if (Roles[j].role_id === permissionOverwrites.id) {
+				// Update existing role
+				// We have the permission override role in our DB
+				if (permissionOverwrites.allow.bitfield === Roles[j].allow_bitfield) {
 				} else {
-					size = ToUpdate.set(element.id, [{
+					// Allow value changed
+					if (ToUpdate.has(element.id)) {
+						size = ToUpdate.set(element.id, [{						
+							allow_bitfield: permissionOverwrites.allow.bitfield,
+							channel_id: element.id,
+							type: permissionOverwrites.type,
+							deny_bitfield: permissionOverwrites.deny.bitfield,
+							role_id: permissionOverwrites.id,
+							allow_changed: true}
+						]).size
+						// Object.assign(ToUpdate.get(element.id)![j],	{
+						// 	allow_bitfield: permissionOverwrites.allow.bitfield,
+						// 	channel_id: element.id,
+						// 	type: permissionOverwrites.type,
+						// 	deny_bitfield: permissionOverwrites.deny.bitfield,
+						// 	role_id: permissionOverwrites.id,
+						// 	allow_changed: true
+						// })
+	
+					} else {
+						size = ToUpdate.set(element.id, [{
+							allow_bitfield: permissionOverwrites.allow.bitfield,
+							channel_id: element.id,
+							type: permissionOverwrites.type,
+							deny_bitfield: permissionOverwrites.deny.bitfield,
+							role_id: permissionOverwrites.id,
+							allow_changed: true
+						}]).size
+					}
+	
+					const a = ToUpdate.get(element.id)![size - 1];
+					if (a.allow_changed === true && a.deny_changed === true) {
+						a.both_changed = true
+					}
+				}
+	
+				if (permissionOverwrites.deny.bitfield === Roles[j].deny_bitfield) {
+	
+				} else {
+					// Deny value changed
+					if (ToUpdate.has(element.id)) {
+						size = ToUpdate.set(element.id, [{						
+							allow_bitfield: permissionOverwrites.allow.bitfield,
+							channel_id: element.id,
+							type: permissionOverwrites.type,
+							deny_bitfield: permissionOverwrites.deny.bitfield,
+							role_id: permissionOverwrites.id,
+							deny_changed: true}
+						]).size
+						// Object.assign(ToUpdate.get(element.id)![j],	{
+						// 	allow_bitfield: permissionOverwrites.allow.bitfield,
+						// 	channel_id: element.id,
+						// 	type: permissionOverwrites.type,
+						// 	deny_bitfield: permissionOverwrites.deny.bitfield,
+						// 	role_id: permissionOverwrites.id,
+						// 	deny_changed: true
+						// })
+	
+					} else {
+						size = ToUpdate.set(element.id, [{
+							allow_bitfield: permissionOverwrites.allow.bitfield,
+							channel_id: element.id,
+							type: permissionOverwrites.type,
+							deny_bitfield: permissionOverwrites.deny.bitfield,
+							role_id: permissionOverwrites.id,
+							deny_changed: true
+						}]).size
+					}
+					const a = ToUpdate.get(element.id)![size - 1];
+					if (a.allow_changed === true && a.deny_changed === true) {
+						a.both_changed = true
+					}
+				}
+	
+				delete Roles[j]
+	
+			} else {
+				// Add a role that is not present in our DB
+				if (ToAdd.has(element.id)) {
+					ToAdd.get(element.id)![j] = {
 						allow_bitfield: permissionOverwrites.allow.bitfield,
 						channel_id: element.id,
 						type: permissionOverwrites.type,
 						deny_bitfield: permissionOverwrites.deny.bitfield,
-						role_id: permissionOverwrites.id,
-						allow_changed: true
-					}]).size
-				}
-
-				const a = ToUpdate.get(element.id)![size - 1];
-				if (a.allow_changed === true && a.deny_changed === true) {
-					a.both_changed = true
+						role_id: permissionOverwrites.id
+					};
+				} else {
+					ToAdd.set(element.id, [{
+						allow_bitfield: permissionOverwrites.allow.bitfield,
+						channel_id: element.id,
+						type: permissionOverwrites.type,
+						deny_bitfield: permissionOverwrites.deny.bitfield,
+						role_id: permissionOverwrites.id
+					}])
 				}
 			}
-
-			if (permissionOverwrites.deny.bitfield === Roles[j].deny_bitfield) {
-
-			} else {
-				// Deny value changed
-				Roles[j].deny_bitfield = permissionOverwrites.deny.bitfield
-				if (ToUpdate.has(element.id)) {
-					Object.assign(ToUpdate.get(element.id)![j],	{
-						allow_bitfield: permissionOverwrites.allow.bitfield,
-						channel_id: element.id,
-						type: permissionOverwrites.type,
-						deny_bitfield: permissionOverwrites.deny.bitfield,
-						role_id: permissionOverwrites.id,
-						deny_changed: true
-					})
-
-				} else {
-					size = ToUpdate.set(element.id, [{
-						allow_bitfield: permissionOverwrites.allow.bitfield,
-						channel_id: element.id,
-						type: permissionOverwrites.type,
-						deny_bitfield: permissionOverwrites.deny.bitfield,
-						role_id: permissionOverwrites.id,
-						deny_changed: true
-					}]).size
-				}
-				const a = ToUpdate.get(element.id)![size - 1];
-				if (a.allow_changed === true && a.deny_changed === true) {
-					a.both_changed = true
-				}
-			}
-
-			delete Roles[j]
-
 		} else {
-			// Add a role that is not present in our DB
+			// Add the role
 			if (ToAdd.has(element.id)) {
 				ToAdd.get(element.id)![j] = {
 					allow_bitfield: permissionOverwrites.allow.bitfield,
@@ -198,6 +233,7 @@ function HandleUpdatingPermissions<T extends TextChannel | VoiceChannel | StoreC
 				}])
 			}
 		}
+
 
 		j++;
 	})
@@ -273,7 +309,7 @@ async function handleChannelRoles(): Promise<void> {
 					PermissionsToRemove.push({ channel_id: element.channel_id, role_id: element.role_id, deny: element.deny_bitfield, allow: element.allow_bitfield });
 				}
 			})
-		} a
+		}
 	})
 
 	if (PermissionsToRemove.length > 0) {
@@ -298,6 +334,7 @@ async function handleUsers(): Promise<void> {
 		}
 		GuildMembers.delete(key)
 	});
+
 	if (UsersToAdd.length > 0) {
 		await database.AddUsers(UsersToAdd);
 		database.AddGuildMembers(UsersToAdd);
@@ -346,7 +383,10 @@ async function handleRoles(): Promise<void> {
 }
 
 client.on("ready", async () => {
+
+	const me = client.guilds.cache.get('362257054829641758')
 	performance.mark("a");
+	 client.guilds.cache.first()?.channels
 	// register guild
 	await handleGuild();
 	// Check all users. Remove, Add, Update
