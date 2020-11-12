@@ -14,8 +14,6 @@ import {
 	Role, DMChannel, StoreChannel, NewsChannel, Invite, PermissionOverwrites, GuildEmoji
 } from "discord.js";
 
-
-import { PrismaClient } from "@prisma/client"
 import { performance, PerformanceObserver } from 'perf_hooks';
 
 import { obs } from "../../timer"
@@ -56,10 +54,11 @@ export const DEBUG_LOG_ENABLED = {
 }
 
 class DB {
-	public async UpdateEmojiName(id: string, name: string) {
-		const UpdateEmoji = `UPDATE emojis SET name = '${name}' WHERE emoji_id = '${id}';`
+	public async UpdateEmojiName(id: string, NewName: string, OldName: string, executor: string = "") {
+		const UpdateEmoji = `UPDATE emojis SET name = '${NewName}' WHERE emoji_id = '${id}';`
+		const UpdateEmojiLog = `INSERT INTO log__emojis (emoji_id, executor, og_name, type) VALUES ('${id}', ${executor ? executor : "NULL"}, '${OldName}', 'edit');`
 
-		await this.GetQuery(UpdateEmoji)
+		await this.GetQuery(UpdateEmoji + UpdateEmojiLog)
 	}
 	public async RemoveEmoji(id: string, executor: string | null = null) {
 		const RemoveEmoji = `UPDATE emojis SET is_deleted = '1' WHERE emoji_id = '${id}';`
@@ -97,12 +96,12 @@ class DB {
 		await this.GetQuery(query);
 	}
 	public async UpdateVoiceChannelUserLimit(newChannel: VoiceChannel) {
-		let sql = `UPDATE channel__voice SET user_limit = ${newChannel.userLimit} WHERE channel_id = '${newChannel.id}';`
+		let sql = `UPDATE channels SET user_limit = ${newChannel.userLimit} WHERE channel_id = '${newChannel.id}';`
 
 		this.GetQuery(sql);
 	}
 	public async UpdateVoiceChannelBitrate(newChannel: VoiceChannel) {
-		let sql = `UPDATE channel__voice SET bitrate = '${newChannel.bitrate}' WHERE channel_id = '${newChannel.id}';`
+		let sql = `UPDATE channels SET bitrate = '${newChannel.bitrate}' WHERE channel_id = '${newChannel.id}';`
 
 		this.GetQuery(sql);
 	}
@@ -211,38 +210,34 @@ class DB {
 		return a;
 	}
 	public async AddDMChannel(channel: DMChannel) {
-		await this.prisma.channels.create({
-			data: {
-				channel_id: channel.id,
-				types: "dm",
-				channel__dm: {
-					create: {
-						recepient: channel.recipient.id
-					}
-				}
-			}
-		})
+		const sql = `INSERT INTO channels (channel_id, types, recepient) VALUES ('${channel.id}', 'dm', '${channel.recipient.id}') `
+
+		await this.GetQuery(sql)
 	}
 	public async UpdateTextChannelNsfw(channelId: string, nsfw: boolean) {
 		if (DEBUG_LOG_ENABLED.ChannelUpdate.nsfw) {
 			console.log(`Channel id: ${channelId} has set nsfw to ${nsfw}`)
 		}
 
-		await this.prisma.channel__text.update({ where: { channel_id: channelId }, data: { nsfw: nsfw } })
+		const sql = `UPDATE channels SET nsfw = '${nsfw}' WHERE channel_id = '${channelId}';`
+
+		await this.GetQuery(sql)
 	}
 	public async UpdateTextChannelRateLimit(channelId: string, rateLimitPerUser: number) {
 		if (DEBUG_LOG_ENABLED.ChannelUpdate.rateLimit) {
 			console.log(`Channel id: ${channelId} has set ratelimit to ${rateLimitPerUser}`)
 		}
+		const sql = `UPDATE channels SET rate_limit_per_user = '${rateLimitPerUser}' WHERE channel_id = '${channelId}';`
 
-		await this.prisma.channel__text.update({ where: { channel_id: channelId }, data: { rate_limit_per_user: rateLimitPerUser } })
+		await this.GetQuery(sql)
 	}
 	public async UpdateTextChannelTopic(channelId: string, topic: string | null) {
 		if (DEBUG_LOG_ENABLED.ChannelUpdate.topic) {
 			console.log(`Channel id: ${channelId} has set topic to ${topic}`)
 		}
+		const sql = `UPDATE channels SET topic = 'topic' WHERE channel_id = '${channelId}';`
 
-		await this.prisma.channel__text.update({ where: { channel_id: channelId }, data: { topic: topic } })
+		await this.GetQuery(sql)
 	}
 
 	/**
@@ -286,17 +281,9 @@ class DB {
 
 				if (!permissionOverwritesOld.has(key)) {
 					// permissions don't match add that permission
-					await this.prisma.channel_permissions.create({
-						data: {
-							channels: { connect: { channel_id: channelId } },
-							allow_bitfield: element.allow.bitfield,
-							deny_bitfield: element.deny.bitfield,
-							role_id: key,
-							type: element.type
-						}
-					})
+					const sql = `INSERT INTO channel_permissions (channel_id, role_id, type, allow_bitfield, deny_bitfield) VALUES ('${channelId}', '${key}', 'role', '${element.allow.bitfield}', '${element.deny.bitfield}');`
 
-					this.GetQuery(`INSERT INTO log__channel_permissions (role_id, channel_id, executor, type, og_allow, og_deny) VALUES ('${element.id}', '${channelId}', ${executor ? `'${executor}'` : "NULL"}, 'add', NULL, NULL)`)
+					this.GetQuery(`INSERT INTO log__channel_permissions (role_id, channel_id, executor, type, og_allow, og_deny) VALUES ('${element.id}', '${channelId}', ${executor ? `'${executor}'` : "NULL"}, 'add', NULL, NULL);` + sql)
 					return;
 				}
 
@@ -348,14 +335,10 @@ class DB {
 		if (DEBUG_LOG_ENABLED.UpdateGuildName) {
 			console.log(`Guild id: ${id} Changed treir name to ${name}`)
 		}
-		await this.prisma.guilds.update({
-			where: {
-				id: id
-			},
-			data: {
-				name: name
-			}
-		})
+
+		const sql = `UPDATE guilds SET name = '${name}' WHERE id = '${id}';`
+
+		await this.GetQuery(sql)
 	}
 	// invite_id: invite.code,
 	// channel_id: invite.channel.id,
@@ -367,43 +350,26 @@ class DB {
 	// temporary: invite.temporary,
 	// deleted: false
 	public async AddInvite(invite: Invite) {
-		await this.prisma.channel_invites.create({
-			data: {
-				invite_id: invite.code,
-				channels: { connect: { channel_id: invite.channel.id } },
-				created_at: invite.createdTimestamp!,
-				guild_user: { connect: { user_id: invite.inviter?.id } },
-				max_age: invite.maxAge,
-				max_uses: invite.maxUses,
-				uses: invite.uses,
-				temporary: invite.temporary,
-				deleted: false
-			}
-		})
+
+		const sql = `INSERT INTO channel_invites (invite_id, channel_id, created_at, inviter_id, max_age, max_uses, uses, temporary) VALUES	('${invite.code}', '${invite.channel.id}', '${invite.createdTimestamp}', '${invite.inviter?.id}', '${invite.maxAge}', '${invite.maxUses}', '${invite.uses}', '${invite.temporary}')`
+
+
+		await this.GetQuery(sql)
 	}
 	/** 
 	 * Mark the invite as deleted
 	*/
 	public async RemoveInvite(invite: Invite) {
-		await this.prisma.channel_invites.update({
-			where: {
-				invite_id: invite.code
-			},
-			data: {
-				deleted: true
-			}
-		})
+
+		const sql = `UPDATE channel_invites SET deleted=true WHERE invite_id = ${invite.code};`	
+
+		await this.GetQuery(sql)
 	}
 
 	public async ExpireInvite(invite: Invite) {
-		await this.prisma.channel_invites.update({
-			where: {
-				invite_id: invite.code
-			},
-			data: {
-				expired: true
-			}
-		})
+		const sql = `UPDATE channel_invites SET expired=true WHERE invite_id = ${invite.code};`	
+
+		await this.GetQuery(sql)
 	}
 
 	/**
@@ -431,7 +397,6 @@ class DB {
 		this.GetQuery(AddRole);
 	}
 	public pool: Pool;
-	private prisma: PrismaClient
 	GuildId: string;
 	constructor() {
 		this.pool = createPool({
@@ -445,7 +410,6 @@ class DB {
 			debug: false,
 		});
 		this.GuildId = "";
-		this.prisma = new PrismaClient()
 	}
 
 	// private SetQuery<T>(query: string, values: T) {
@@ -540,27 +504,18 @@ class DB {
 	public async RemoveChannels(channels: Set<string>) {
 		// TODO: try to fetch some messages from discord as there may be gaps in our DB
 		let messagesCount: number
+		let sql = ""
 		channels.forEach(async (channel) => {
-			messagesCount = await this.prisma.channel_messages.count({
-				where: {
-					channel_id: channel
-				}
-			})
+			sql = `SELECT COUNT(*) FROM channel_messages WHERE channel_id = ${channel}`
+			// TODO TEST if it is a single value
+			messagesCount = (await this.GetQuery(sql) as any as number)
 			if (messagesCount === 0) {
 				// There are no messages in the channel. We can completly delete it
 				// FIX: prisma2 doesn't support CASCADE deletes if the FK is non-nullable
-				await this.prisma.$executeRaw(`DELETE FROM channels WHERE channel_id = '${channel}'`)
+				await this.GetQuery(`DELETE FROM channels WHERE channel_id = '${channel}'`)
 			} else {
 				// Channel has messages. Mark as deleted
-				await this.prisma.channels.update({
-					where: {
-						"channel_id": channel,
-					},
-					data: {
-						is_deleted: true
-					}
-
-				})
+				await this.GetQuery(`UPDATE channels SET is_deleted=true WHERE channel_id=${channel}`)
 			}
 		})
 	}
@@ -571,28 +526,18 @@ class DB {
 	*/
 	public async RemoveChannel(channel: Channel) {
 		// TODO: try to fetch some messages from discord as there may be gaps in our DB
-		const count = await this.prisma.channel_messages.count({
-			where: {
-				channel_id: channel.id
-			}
-		})
+		const count = (await this.GetQuery(`SELECT COUNT(*) FROM channel_messages WHERE channel_id = ${channel.id}`) as any as number)
+
+
 		// TODO: Handle logging the deletion
 		if (count === 0) {
 			// There are no messages in the channel. We can completly delete it
 			// FIX: prisma2 doesn't support CASCADE deletes if the FK is non-nullable
-			await this.prisma.$executeRaw(`DELETE FROM channels WHERE channel_id = '${channel}'`)
+			await this.GetQuery(`DELETE FROM channels WHERE channel_id = '${channel}'`)
 
 		} else {
 			// > 0. mark the channel as deleted
-			await this.prisma.channels.update({
-				where: {
-					channel_id: channel.id
-				},
-				data: {
-					is_deleted: true,
-					//position: -1
-				}
-			})
+			await this.GetQuery(`UPDATE channels SET is_deleted=true WHERE channel_id=${channel}`)
 		}
 	}
 
@@ -654,22 +599,18 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 			})
 		}
 
-		let ChannelQuery = "INSERT INTO channels (channel_id, types) VALUES"
 		let GuildToChannelQuery = "INSERT INTO guild_to_channel (guild_id, channel_id) VALUES";
 		let ChannelPermissionsQuery = "INSERT INTO channel_permissions (channel_id, role_id, type, allow_bitfield, deny_bitfield) VALUES"
 		let InsertChannelQuery = "";
 
 		channels.forEach((element) => {
-			// add the channel
-			ChannelQuery += `('${element.id}', '${element.type}'),`
-
 			if (element instanceof TextChannel) {
 				element.permissionOverwrites.forEach((permission) => {
 					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 				})
 
 				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
-				InsertChannelQuery += `INSERT INTO channel__text (channel_id, name, position, topic, nsfw, rate_limit_per_user) VALUES ('${element.id}', '${element.name}', '${element.position}', '${element.topic}', '${element.nsfw ? 1 : 0}', '${element.rateLimitPerUser}');`
+				InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, name, position, topic, nsfw, rate_limit_per_user) VALUES ('${element.id}', ${element.parent ? `'${element.parent.id}'` : "NULL"}, 'text', '${element.name}', '${element.position}', '${element.topic}', '${element.nsfw ? 1 : 0}', '${element.rateLimitPerUser}');`
 
 			}
 			else if (element instanceof VoiceChannel) {
@@ -678,7 +619,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 				})
 
 				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
-				InsertChannelQuery += `INSERT INTO channel__voice (channel_id, name, bitrate, user_limit, position) VALUES ('${element.id}', '${element.name}', '${element.bitrate}', '${element.userLimit}', '${element.position}');`
+				InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, name, bitrate, user_limit, position) VALUES ('${element.id}', ${element.parent ? `'${element.parent.id}'` : "NULL"}, 'voice', '${element.name}', '${element.bitrate}', '${element.userLimit}', '${element.position}');`
 			}
 			else if (element instanceof CategoryChannel) {
 				element.permissionOverwrites.forEach((permission) => {
@@ -686,7 +627,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 				})
 
 				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
-				InsertChannelQuery += `INSERT INTO channel__category (channel_id, position, name) VALUES ('${element.id}', '${element.position}', '${element.name}');`
+				InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, position, name) VALUES ('${element.id}', ${element.parent ? `'${element.parent.id}'` : "NULL"}, 'category', '${element.position}', '${element.name}');`
 			}
 			else if (element instanceof DMChannel) {
 				return;
@@ -697,7 +638,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 				})
 
 				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
-				InsertChannelQuery += `INSERT INTO channel__store (channel_id, name, position) VALUES ('${element.id}', '${element.name}', '${element.position}');`
+				InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, name, position) VALUES ('${element.id}', ${element.parent ? `'${element.parent.id}'` : "NULL"}, 'store', '${element.name}', '${element.position}');`
 			}
 			else if (element instanceof NewsChannel) {
 				element.permissionOverwrites.forEach((permission) => {
@@ -705,7 +646,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 				})
 
 				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
-				InsertChannelQuery += `INSERT INTO channel__news (channel_id, name, position) VALUES ('${element.id}', '${element.name}', '${element.position}');`
+				InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, name, position) VALUES ('${element.id}', ${element.parent ? `'${element.parent.id}'` : "NULL"}, 'news', '${element.name}', '${element.position}');`
 			} else {
 				// Either GroupDM channel or unkown
 				console.log(chalk.red(''))
@@ -714,7 +655,6 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 		});
 		// query was did not change
 
-		ChannelQuery = `${ChannelQuery.slice(0, -1)};`;
 		ChannelPermissionsQuery = `${ChannelPermissionsQuery.slice(0, -1)};`;
 		GuildToChannelQuery = `${GuildToChannelQuery.slice(0, -1)};`;
 
@@ -722,10 +662,9 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 			// DM Channel
 			return;
 		}
-		await this.GetQuery(ChannelQuery);
+		await this.GetQuery(InsertChannelQuery)
 		await this.GetQuery(ChannelPermissionsQuery)
 		await this.GetQuery(GuildToChannelQuery)
-		await this.GetQuery(InsertChannelQuery)
 
 	}
 	/**
@@ -970,13 +909,13 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 		}
 
 		// Inserts the user. This the global user and not a GuildMember
-		let InsertUsers = "INSERT IGNORE INTO users (id, username, discriminator, bot) VALUES";
+		let InsertUsers = "INSERT IGNORE INTO users (id, username, discriminator, avatar, bot) VALUES";
 		// Link the user to a guild
-		let InsertUsersToGuild = "INSERT INTO user_to_guild (user_id, guild_id) VALUES";
+		let InsertUsersToGuild = "INSERT INTO user_to_guild (user_id, guild_id, permissions) VALUES";
 
 		Users.forEach((element) => {
-			InsertUsers += `('${element.id}', '${element.user.username}', '${element.user.discriminator}', ${element.user.bot ? 1 : 0}),`
-			InsertUsersToGuild += `('${element.id}', '${this.GuildId}'),`
+			InsertUsers += `('${element.id}', '${element.user.username}', '${element.user.discriminator}','${element.user.avatar}' , ${element.user.bot ? 1 : 0}),`
+			InsertUsersToGuild += `('${element.id}', '${this.GuildId}', ${element.permissions.bitfield}),`
 		})
 		// , -> ;
 		InsertUsers = `${InsertUsers.slice(0, -1)};`;
@@ -988,10 +927,9 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 	// GuildMember is removed from a guild. That member will be removed from that guild
 	// BUT the User will stay in the databse as he may be in other guild
 	public async RemoveGuildMembersFromGuild(GuildMember: Set<string>) {
-		let RemoveUsersFromGuild = `
-		DELETE FROM user_to_guild WHERE user_to_guild.guild_id = ${this.GuildId}`;
+		let RemoveUsersFromGuild = `DELETE FROM user_to_guild WHERE guild_id = ${this.GuildId}`;
 		GuildMember.forEach((element) => {
-			RemoveUsersFromGuild += `AND user_to_guild.user_id = ${element}`;
+			RemoveUsersFromGuild += ` AND user_id = ${element}`;
 		})
 
 		RemoveUsersFromGuild += ";";
@@ -1010,8 +948,9 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 			return true;
 		}
 	}
-	public AddGuild(Guild: Guild) {
-		this.GetQuery(`INSERT INTO guilds (id, name , owner_id) VALUES ('${Guild.id}', '${Guild.name}', '${Guild.ownerID}');`);
+	public async AddGuild(Guild: Guild) {
+		// Guild may already be present from discord auth. Indicate that the bot is present in the guild
+		await this.GetQuery(`INSERT INTO guilds (id, name, icon, owner_id) VALUES ('${Guild.id}', '${Guild.name}', '${Guild.icon}', '${Guild.ownerID}') ON DUPLICATE KEY UPDATE owner_id=VALUES(owner_id), bot_active = 1;`);
 	}
 	public async UpdateAllChannels(Channels: ChannelManager) {
 		const query = "UPDATE `channels` SET `name`=?,`type`=?,`position`=? WHERE `channels`.`id` = ?;";
@@ -1147,15 +1086,15 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 		}
 
 		if (type === "text") {
-			await this.prisma.channel__text.update({ where: { channel_id: channelId }, data: { position: newPos } })
+			await this.GetQuery(`UPDATE channels SET position='${newPos}' WHERE channel_id='${channelId}';`)
 		} else if (type === "voice") {
-			await this.prisma.channel__voice.update({ where: { channel_id: channelId }, data: { position: newPos } })
+			await this.GetQuery(`UPDATE channels SET position='${newPos}' WHERE channel_id='${channelId}';`)
 		} else if (type === "category") {
-			await this.prisma.channel__category.update({ where: { channel_id: channelId }, data: { position: newPos } })
+			await this.GetQuery(`UPDATE channels SET position='${newPos}' WHERE channel_id='${channelId}';`)
 		} else if (type === "news") {
-			await this.prisma.channel__news.update({ where: { channel_id: channelId }, data: { position: newPos } })
+			await this.GetQuery(`UPDATE channels SET position='${newPos}' WHERE channel_id='${channelId}';`)
 		} else if (type === "store") {
-			await this.prisma.channel__store.update({ where: { channel_id: channelId }, data: { position: newPos } })
+			await this.GetQuery(`UPDATE channels SET position='${newPos}' WHERE channel_id='${channelId}';`)
 		}
 	}
 
@@ -1165,15 +1104,15 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 		}
 
 		if (type === "text") {
-			await this.prisma.channel__text.update({ where: { channel_id: channelId }, data: { name: name } })
+			await this.GetQuery(`UPDATE channels SET name='${name}' WHERE channel_id='${channelId}';`)
 		} else if (type === "voice") {
-			await this.prisma.channel__voice.update({ where: { channel_id: channelId }, data: { name: name } })
+			await this.GetQuery(`UPDATE channels SET name='${name}' WHERE channel_id='${channelId}';`)
 		} else if (type === "category") {
-			await this.prisma.channel__category.update({ where: { channel_id: channelId }, data: { name: name } })
+			await this.GetQuery(`UPDATE channels SET name='${name}' WHERE channel_id='${channelId}';`)
 		} else if (type === "news") {
-			await this.prisma.channel__news.update({ where: { channel_id: channelId }, data: { name: name } })
+			await this.GetQuery(`UPDATE channels SET name='${name}' WHERE channel_id='${channelId}';`)
 		} else if (type === "store") {
-			await this.prisma.channel__store.update({ where: { channel_id: channelId }, data: { name: name } })
+			await this.GetQuery(`UPDATE channels SET name='${name}' WHERE channel_id='${channelId}';`)
 		}
 	}
 
