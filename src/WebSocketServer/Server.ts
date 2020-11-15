@@ -45,12 +45,12 @@ SSLApp({
 		const DecMessage = enc.decode(message);
 
 		if (ws.bot) {
-			if (RegexIsMessage.test(DecMessage)) {
-				const JsonMessage = JSON.parse(DecMessage) as IBotMessage;
+			const JsonMessage = JSON.parse(DecMessage)
+			if (JsonMessage.message) {
 				ws.publish(JsonMessage.message.guild_id, message)
 			}
 		} else {
-			const [, id, guild_id] = ChannelIDRegex.exec(DecMessage,) || ['', '', '']
+			const [, id, guild_id] = ChannelIDRegex.exec(DecMessage) || ['', '', '']
 			// INDEX 0: whole string, 1: 'id', 2: id string
 			if (guild_id) {
 				ws.subscribe(guild_id);

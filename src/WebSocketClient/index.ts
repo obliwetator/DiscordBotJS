@@ -1,11 +1,10 @@
 import ws from "ws";
 import { ctx } from "..";
 
-export const WebSocket = new ws("wss://patrykstyla.com:8080");
+export const WebSocket = new ws("wss://patrykstyla.com:9001");
 
 WebSocket.on("open",() => {
     console.log(ctx.green('Bot socket is ready'))
-	WebSocket.send("Bot socket is ready");
 });
 
 WebSocket.on("error", (error) => {
@@ -27,3 +26,9 @@ WebSocket.on("unexpected-response", (request, response) => {
 WebSocket.on("close", (code, reason) => {
 	console.log(ctx.keyword('orange')(`Connection closed with code: ${code} and reason: ${reason}`))
 })
+
+setInterval(() => {
+	if (WebSocket.readyState === ws.OPEN) {
+		WebSocket.send("keep alive")
+	}
+}, 25000);
