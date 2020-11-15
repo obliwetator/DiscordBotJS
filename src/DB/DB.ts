@@ -11,7 +11,7 @@ import {
 	VoiceChannel,
 	GuildMember,
 	PartialMessage,
-	Role, DMChannel, StoreChannel, NewsChannel, Invite, PermissionOverwrites, GuildEmoji
+	Role, DMChannel, StoreChannel, NewsChannel, Invite, PermissionOverwrites, GuildEmoji, PartialChannelData
 } from "discord.js";
 
 import { performance, PerformanceObserver } from 'perf_hooks';
@@ -54,10 +54,11 @@ export const DEBUG_LOG_ENABLED = {
 }
 
 class DB {
-	public async UpdateEmojiName(id: string, NewName: string, OldName: string, executor: string = "") {
+	public async UpdateEmojiName(id: string, NewName: string, OldName: string, executor: string | null = null) {
 		const UpdateEmoji = `UPDATE emojis SET name = '${NewName}' WHERE emoji_id = '${id}';`
 		const UpdateEmojiLog = `INSERT INTO log__emojis (emoji_id, executor, og_name, type) VALUES ('${id}', ${executor ? executor : "NULL"}, '${OldName}', 'edit');`
 
+		const a = UpdateEmoji + UpdateEmojiLog;
 		await this.GetQuery(UpdateEmoji + UpdateEmojiLog)
 	}
 	public async RemoveEmoji(id: string, executor: string | null = null) {
@@ -67,9 +68,11 @@ class DB {
 		await this.GetQuery(RemoveEmoji + RemoveEmojiLog);
 	}
 	public async AddEmoji(emoji: GuildEmoji, userId: string | null = null) {
-		let query = `INSERT INTO emojis (emoji_id, name, user_id, require_colons, managed, animated, available) VALUES ('${emoji.id}', '${emoji.name}', ${userId ? userId : "NULL"}, '${emoji.requiresColons}', '${emoji.managed}', '${emoji.animated}', '${emoji.available}');`
+		let AddEmoji = `INSERT INTO emojis (emoji_id, name, user_id, require_colons, managed, animated, available) VALUES ('${emoji.id}', '${emoji.name}', ${userId ? `'${userId}'` : "NULL"}, ${emoji.requiresColons ? 1 : 0}, ${emoji.managed ? 1 : 0}, ${emoji.animated ? 1 : 0}, ${emoji.available ? 1 : 0});`
+		const AddEmojiLog = `INSERT INTO log__emojis (emoji_id, executor, og_name, type) VALUES ('${emoji.id}', ${userId ? userId : "NULL"}, NULL, 'add');`
 
-		await this.GetQuery(query);
+		await this.GetQuery(AddEmoji + AddEmojiLog);
+
 	}
 	public async UpdateRole(oldRole: Role, newRole: Role) {
 		let query = ""
@@ -132,7 +135,6 @@ class DB {
 	}
 	// TODO: Add executor
 	// TODO: Rename
-
 	public async UpdateChannelPermissions1(PermissionsToUpdate: Map<string, ChannelRolePermissions[]>) {
 		let query = "INSERT INTO channel_permissions (channel_id, role_id, type, allow_bitfield, deny_bitfield) VALUES"
 		let dup = "ON DUPLICATE KEY UPDATE allow_bitfield = VALUES(allow_bitfield) , deny_bitfield = VALUES(deny_bitfield)"
@@ -361,13 +363,13 @@ class DB {
 	*/
 	public async RemoveInvite(invite: Invite) {
 
-		const sql = `UPDATE channel_invites SET deleted=true WHERE invite_id = ${invite.code};`	
+		const sql = `UPDATE channel_invites SET deleted=true WHERE invite_id = ${invite.code};`
 
 		await this.GetQuery(sql)
 	}
 
 	public async ExpireInvite(invite: Invite) {
-		const sql = `UPDATE channel_invites SET expired=true WHERE invite_id = ${invite.code};`	
+		const sql = `UPDATE channel_invites SET expired=true WHERE invite_id = ${invite.code};`
 
 		await this.GetQuery(sql)
 	}
@@ -524,20 +526,19 @@ class DB {
 	* The channel is marked as deleted but will stay in the DB to link to any messages in that channel 
 	* as well which guild it belonged to originally
 	*/
-	public async RemoveChannel(channel: Channel) {
+	public async RemoveChannel(channel: Channel, executor: string | null = null) {
 		// TODO: try to fetch some messages from discord as there may be gaps in our DB
-		const count = (await this.GetQuery(`SELECT COUNT(*) FROM channel_messages WHERE channel_id = ${channel.id}`) as any as number)
-
+		const count = (await this.GetQuery(`SELECT COUNT(*) as message_count FROM channel_messages WHERE channel_id = ${channel.id}`) as {message_count: number}[])
 
 		// TODO: Handle logging the deletion
-		if (count === 0) {
+		if (count[0].message_count === 0) {
 			// There are no messages in the channel. We can completly delete it
-			// FIX: prisma2 doesn't support CASCADE deletes if the FK is non-nullable
-			await this.GetQuery(`DELETE FROM channels WHERE channel_id = '${channel}'`)
+			await this.GetQuery(`DELETE FROM channels WHERE channel_id = '${channel.id}'`)
 
 		} else {
 			// > 0. mark the channel as deleted
-			await this.GetQuery(`UPDATE channels SET is_deleted=true WHERE channel_id=${channel}`)
+			await this.GetQuery(`INSERT INTO log__channels (channel_id, channel_type, type, executor) VALUES ('${channel.id}', (SELECT types FROM channels WHERE channel_id = '${channel.id}'), 'remove', '${executor ? executor : "NULL"}')`)
+			await this.GetQuery(`UPDATE channels SET is_deleted=true WHERE channel_id=${channel.id}`);
 		}
 	}
 
@@ -592,7 +593,80 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 		await this.AddMessage(message);
 	}
 
-	public async AddChannels(channels: Array<Channel>) {
+	public async AddChannel(channel: Channel, executor: string | null = null) {
+		let GuildToChannelQuery = "INSERT INTO guild_to_channel (guild_id, channel_id) VALUES";
+		let ChannelPermissionsQuery = "INSERT INTO channel_permissions (channel_id, role_id, type, allow_bitfield, deny_bitfield) VALUES"
+		let InsertChannelQuery = "";
+		let InsertLogChannels = `INSERT INTO log__channels (channel_id, channel_type, type, executor) VALUES`
+
+		if (channel instanceof TextChannel) {
+			channel.permissionOverwrites.forEach((permission) => {
+				ChannelPermissionsQuery += `('${channel.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
+			})
+
+			GuildToChannelQuery += `('${this.GuildId}', '${channel.id}')`;
+			InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, name, position, topic, nsfw, rate_limit_per_user) VALUES ('${channel.id}', ${channel.parent ? `'${channel.parent.id}'` : "NULL"}, 'text', '${channel.name}', '${channel.position}', '${channel.topic}', '${channel.nsfw ? 1 : 0}', '${channel.rateLimitPerUser}');`
+			InsertLogChannels += `('${channel.id}', 'text', 'add', '${executor ? executor : "NULL"}')`;
+		}
+		else if (channel instanceof VoiceChannel) {
+			channel.permissionOverwrites.forEach((permission) => {
+				ChannelPermissionsQuery += `('${channel.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
+			})
+
+			GuildToChannelQuery += `('${this.GuildId}', '${channel.id}')`;
+			InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, name, bitrate, user_limit, position) VALUES ('${channel.id}', ${channel.parent ? `'${channel.parent.id}'` : "NULL"}, 'voice', '${channel.name}', '${channel.bitrate}', '${channel.userLimit}', '${channel.position}');`
+			InsertLogChannels += `('${channel.id}', 'vocie', 'add', '${executor ? executor : "NULL"}')`;
+		}
+		else if (channel instanceof CategoryChannel) {
+			channel.permissionOverwrites.forEach((permission) => {
+				ChannelPermissionsQuery += `('${channel.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
+			})
+
+			GuildToChannelQuery += `('${this.GuildId}', '${channel.id}'),`;
+			InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, position, name) VALUES ('${channel.id}', ${channel.parent ? `'${channel.parent.id}'` : "NULL"}, 'category', '${channel.position}', '${channel.name}');`
+			InsertLogChannels += `('${channel.id}', 'category', 'add', '${executor ? executor : "NULL"}')`;
+		}
+		else if (channel instanceof DMChannel) {
+			return;
+		}
+		else if (channel instanceof StoreChannel) {
+			channel.permissionOverwrites.forEach((permission) => {
+				ChannelPermissionsQuery += `('${channel.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
+			})
+
+			GuildToChannelQuery += `('${this.GuildId}', '${channel.id}')`;
+			InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, name, position) VALUES ('${channel.id}', ${channel.parent ? `'${channel.parent.id}'` : "NULL"}, 'store', '${channel.name}', '${channel.position}');`
+			InsertLogChannels += `('${channel.id}', 'store', 'add', '${executor ? executor : "NULL"}')`;
+		}
+		else if (channel instanceof NewsChannel) {
+			channel.permissionOverwrites.forEach((permission) => {
+				ChannelPermissionsQuery += `('${channel.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
+			})
+
+			GuildToChannelQuery += `('${this.GuildId}', '${channel.id}')`;
+			InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, name, position) VALUES ('${channel.id}', ${channel.parent ? `'${channel.parent.id}'` : "NULL"}, 'news', '${channel.name}', '${channel.position}');`
+			InsertLogChannels += `('${channel.id}', 'news', 'add', '${executor ? executor : "NULL"}')`;
+		} else {
+			// Either GroupDM channel or unkown
+			console.log(chalk.red(''))
+			this.AddLog(`Unimplemeneted type type of type ${channel.type}`, LogTypes.general_log);
+		}
+
+		if (InsertChannelQuery.length === 0) {
+			// DM Channel
+			return;
+		}
+
+		ChannelPermissionsQuery = `${ChannelPermissionsQuery.slice(0, -1)};`;
+
+		await this.GetQuery(InsertChannelQuery)
+		await this.GetQuery(ChannelPermissionsQuery)
+		await this.GetQuery(GuildToChannelQuery)
+		await this.GetQuery(InsertLogChannels);
+	}
+
+	/** Meant to run at startup */
+	public async AddChannels(channels: Array<Channel>, executor: string | null = null) {
 		if (DEBUG_LOG_ENABLED.AddChannel) {
 			channels.forEach((value) => {
 				console.log(`Channel id: ${value.id} added`)
@@ -602,6 +676,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 		let GuildToChannelQuery = "INSERT INTO guild_to_channel (guild_id, channel_id) VALUES";
 		let ChannelPermissionsQuery = "INSERT INTO channel_permissions (channel_id, role_id, type, allow_bitfield, deny_bitfield) VALUES"
 		let InsertChannelQuery = "";
+
 
 		channels.forEach((element) => {
 			if (element instanceof TextChannel) {

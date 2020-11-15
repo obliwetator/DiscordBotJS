@@ -1,21 +1,40 @@
+import { CategoryChannel, DMChannel, GuildChannel, NewsChannel, StoreChannel, TextChannel, VoiceChannel } from "discord.js";
+import { client, database, GetFetchLogsSingle } from "..";
+import { LogTypes } from "../DB/DB";
+
+
 // This fires every time the bot receives a message for the first time from the user since it's been started
 // AND when a channel is created for the first time in a guild
 // This event is unreliable with a DM channel. It creates a race condition with on."message" 
-
-import { CategoryChannel, DMChannel, NewsChannel, StoreChannel, TextChannel, VoiceChannel } from "discord.js";
-import { client, database } from "..";
-import { LogTypes } from "../DB/DB";
-
 // which always finishes first for the first message sent
 client.on("channelCreate", async (channel) => {
-	database.AddChannels([channel])
+	const deletionLog = await GetFetchLogsSingle(channel, 'CHANNEL_CREATE');
 
-	await database.AddLog(`Text Channel Created: ${channel.type}`, LogTypes.channel);
+	if (!deletionLog) {
+		database.AddChannel(channel)
+	} else {
+		const { executor, target } = deletionLog;
+
+		if ((target as GuildChannel).id === channel.id) {
+			// Log matches the created channel
+		}
+		database.AddChannel(channel, executor.id)
+	}
 });
 
-client.on("channelDelete", (channel) => {
-	database.RemoveChannel(channel);
-	database.AddLog(`Text Channel Deleted : ${channel.type}`, LogTypes.channel);
+client.on("channelDelete", async (channel) => {
+	const deletionLog = await GetFetchLogsSingle(channel, 'CHANNEL_DELETE');
+
+	if (!deletionLog) {
+		database.AddChannel(channel)
+	} else {
+		const { executor, target } = deletionLog;
+
+		if ((target as GuildChannel).id === channel.id) {
+			// Log matches the created channel
+		}
+		database.RemoveChannel(channel, executor.id);
+	}
 })
 
 // channelUpdate
@@ -25,6 +44,7 @@ oldChannel       Channel     The channel before the update
 newChannel       Channel     The channel after the update    */
 client.on("channelUpdate", (oldChannel, newChannel) => {
 	// TODO: remove redudant check for one of the channels as both are guaranteed to be of the same type.
+	// TODO: Add executor
 
 	// TEXT
 	if (oldChannel instanceof TextChannel && newChannel instanceof TextChannel) {
