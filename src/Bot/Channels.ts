@@ -1,4 +1,4 @@
-import { CategoryChannel, DMChannel, GuildChannel, NewsChannel, StoreChannel, TextChannel, VoiceChannel } from "discord.js";
+import { CategoryChannel, DMChannel, GuildChannel, NewsChannel, StoreChannel, TextChannel, User, VoiceChannel } from "discord.js";
 import { client, database, GetFetchLogsSingle } from "..";
 import { LogTypes } from "../DB/DB";
 
@@ -32,8 +32,11 @@ client.on("channelDelete", async (channel) => {
 
 		if ((target as GuildChannel).id === channel.id) {
 			// Log matches the created channel
+			database.RemoveChannel(channel, executor.id);
+		} else {
+			// Unkown executor
+			database.RemoveChannel(channel, null);	
 		}
-		database.RemoveChannel(channel, executor.id);
 	}
 })
 
@@ -42,73 +45,99 @@ client.on("channelDelete", async (channel) => {
 PARAMETER        TYPE        DESCRIPTION
 oldChannel       Channel     The channel before the update
 newChannel       Channel     The channel after the update    */
-client.on("channelUpdate", (oldChannel, newChannel) => {
-	// TODO: remove redudant check for one of the channels as both are guaranteed to be of the same type.
-	// TODO: Add executor
+client.on("channelUpdate", async (oldChannel, newChannel) => {
+	const deletionLog = await GetFetchLogsSingle(newChannel, 'CHANNEL_UPDATE');
+	
+	let executor_target: string | null = null
+
+	if (!deletionLog) {
+
+	} else {
+		const { executor, target } = deletionLog;
+
+		if ((target as GuildChannel).id === newChannel.id) {
+			// Log matches the created channel
+			executor_target = executor.id;
+		}
+	}
+	// TODO: Finalize what will go into the logs
 
 	// TEXT
-	if (oldChannel instanceof TextChannel && newChannel instanceof TextChannel) {
-		if (oldChannel.rawPosition !== newChannel.rawPosition) {
+	if (oldChannel instanceof TextChannel) {
+		if (oldChannel.rawPosition !== (newChannel as TextChannel).rawPosition) {
 			// Channel was moved in the guild hierarchy
-			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition, newChannel.type);
-		} else if (oldChannel.name !== newChannel.name) {
-			database.UpdateChannelName(newChannel.id, newChannel.name, newChannel.type);
-		} else if (oldChannel.permissionOverwrites !== newChannel.permissionOverwrites) {
+			database.UpdateChannelPosition((newChannel as TextChannel).id, (newChannel as TextChannel).rawPosition, (newChannel as TextChannel).type, executor_target);
+		} else if (oldChannel.name !== (newChannel as TextChannel).name) {
+			database.UpdateChannelName((newChannel as TextChannel).id, (newChannel as TextChannel).name, (newChannel as TextChannel).type, executor_target);
+		} else if (oldChannel.permissionOverwrites !== (newChannel as TextChannel).permissionOverwrites) {
 			// permissionOverwrites is a Map with the roles that are being filtered
 			// There will always be the @everyone role
-			database.UpdateChannelPermissions(newChannel.id, oldChannel.permissionOverwrites, newChannel.permissionOverwrites)
-		} else if (oldChannel.topic !== newChannel.topic) {
-			database.UpdateTextChannelTopic(newChannel.id, newChannel.topic)
-		} else if (oldChannel.rateLimitPerUser !== newChannel.rateLimitPerUser) {
-			database.UpdateTextChannelRateLimit(newChannel.id, newChannel.rateLimitPerUser)
-		} else if (oldChannel.nsfw !== newChannel.nsfw) {
-			database.UpdateTextChannelNsfw(newChannel.id, newChannel.nsfw);
+			database.UpdateChannelPermissions((newChannel as TextChannel).id, oldChannel.permissionOverwrites, (newChannel as TextChannel).permissionOverwrites, executor_target)
+		} else if (oldChannel.topic !== (newChannel as TextChannel).topic) {
+			database.UpdateTextChannelTopic((newChannel as TextChannel).id, (newChannel as TextChannel).topic, executor_target)
+		} else if (oldChannel.rateLimitPerUser !== (newChannel as TextChannel).rateLimitPerUser) {
+			database.UpdateTextChannelRateLimit((newChannel as TextChannel).id, (newChannel as TextChannel).rateLimitPerUser, executor_target)
+		} else if (oldChannel.nsfw !== (newChannel as TextChannel).nsfw) {
+			database.UpdateTextChannelNsfw((newChannel as TextChannel).id, (newChannel as TextChannel).nsfw, executor_target);
 		}
 		// VOICE
-	} else if (oldChannel instanceof VoiceChannel && newChannel instanceof VoiceChannel) {
-		if (oldChannel.rawPosition !== newChannel.rawPosition) {
+	} else if (oldChannel instanceof VoiceChannel) {
+		if (oldChannel.rawPosition !== (newChannel as VoiceChannel).rawPosition) {
 			// Channel was moved in the guild hierarchy
-			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition, newChannel.type);
-		} else if (oldChannel.name !== newChannel.name) {
-			database.UpdateChannelName(newChannel.id, newChannel.name, "voice")
-		} else if (oldChannel.bitrate !== newChannel.bitrate) {
-			database.UpdateVoiceChannelBitrate(newChannel)
-		} else if (oldChannel.userLimit !== newChannel.userLimit) {
-			database.UpdateVoiceChannelUserLimit(newChannel)
+			database.UpdateChannelPosition((newChannel as VoiceChannel).id, (newChannel as VoiceChannel).rawPosition, (newChannel as VoiceChannel).type, executor_target);
+		} else if (oldChannel.permissionOverwrites !== (newChannel as VoiceChannel).permissionOverwrites) {
+			// permissionOverwrites is a Map with the roles that are being filtered
+			// There will always be the @everyone role
+			database.UpdateChannelPermissions((newChannel as VoiceChannel).id, oldChannel.permissionOverwrites, (newChannel as TextChannel).permissionOverwrites, executor_target)
+		}  else if (oldChannel.name !== (newChannel as VoiceChannel).name) {
+			database.UpdateChannelName((newChannel as VoiceChannel).id, (newChannel as VoiceChannel).name, "voice", executor_target)
+		} else if (oldChannel.bitrate !== (newChannel as VoiceChannel).bitrate) {
+			database.UpdateVoiceChannelBitrate((newChannel as VoiceChannel), executor_target)
+		} else if (oldChannel.userLimit !== (newChannel as VoiceChannel).userLimit) {
+			database.UpdateVoiceChannelUserLimit((newChannel as VoiceChannel), executor_target)
 		}
 		// CATEGORY
-	} else if (oldChannel instanceof CategoryChannel && newChannel instanceof CategoryChannel) {
-		if (oldChannel.rawPosition !== newChannel.rawPosition) {
+	} else if (oldChannel instanceof CategoryChannel) {
+		if (oldChannel.rawPosition !== (newChannel as CategoryChannel).rawPosition) {
 			// Channel was moved in the guild hierarchy
-			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition, newChannel.type);
-		} else if (oldChannel.name !== newChannel.name) {
-			database.UpdateChannelName(newChannel.id, newChannel.name, "category")
+			database.UpdateChannelPosition((newChannel as CategoryChannel).id, (newChannel as CategoryChannel).rawPosition, (newChannel as CategoryChannel).type, executor_target);
+		} else if (oldChannel.permissionOverwrites !== (newChannel as CategoryChannel).permissionOverwrites) {
+			// permissionOverwrites is a Map with the roles that are being filtered
+			// There will always be the @everyone role
+			database.UpdateChannelPermissions((newChannel as CategoryChannel).id, oldChannel.permissionOverwrites, (newChannel as TextChannel).permissionOverwrites, executor_target)
+		}  else if (oldChannel.name !== (newChannel as CategoryChannel).name) {
+			database.UpdateChannelName((newChannel as CategoryChannel).id, (newChannel as CategoryChannel).name, "category", executor_target)
 		}
 		// DM
-	} else if (oldChannel instanceof DMChannel && newChannel instanceof DMChannel) {
+	} else if (oldChannel instanceof DMChannel) {
 		database.AddLog(`DM channel update + ${newChannel.toJSON()}`, LogTypes.channel)
 
 		// STORE
-	} else if (oldChannel instanceof StoreChannel && newChannel instanceof StoreChannel) {
-		if (oldChannel.rawPosition !== newChannel.rawPosition) {
+	} else if (oldChannel instanceof StoreChannel) {
+		if (oldChannel.rawPosition !== (newChannel as StoreChannel).rawPosition) {
 			// Channel was moved in the guild hierarchy
-			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition, newChannel.type);
-		} else if (oldChannel.name !== newChannel.name) {
-			database.UpdateChannelName(newChannel.id, newChannel.name, "store")
-		} // TODO: Rest of store 
-
+			database.UpdateChannelPosition((newChannel as StoreChannel).id, (newChannel as StoreChannel).rawPosition, (newChannel as StoreChannel).type, executor_target);
+		} else if (oldChannel.permissionOverwrites !== (newChannel as StoreChannel).permissionOverwrites) {
+			// permissionOverwrites is a Map with the roles that are being filtered
+			// There will always be the @everyone role
+			database.UpdateChannelPermissions((newChannel as StoreChannel).id, oldChannel.permissionOverwrites, (newChannel as TextChannel).permissionOverwrites, executor_target)
+		}  else if (oldChannel.name !== (newChannel as StoreChannel).name) {
+			database.UpdateChannelName((newChannel as StoreChannel).id, (newChannel as StoreChannel).name, "store", executor_target)
+		}
 		// NEWS
-	} else if (oldChannel instanceof NewsChannel && newChannel instanceof NewsChannel) {
-		if (oldChannel.rawPosition !== newChannel.rawPosition) {
+	} else if (oldChannel instanceof NewsChannel) {
+		if (oldChannel.rawPosition !== (newChannel as NewsChannel).rawPosition) {
 			// Channel was moved in the guild hierarchy
-			database.UpdateChannelPosition(newChannel.id, newChannel.rawPosition, newChannel.type);
-		} else if (oldChannel.name !== newChannel.name) {
-			database.UpdateChannelName(newChannel.id, newChannel.name, "news")
-		} // TODO: Rest of news
+			database.UpdateChannelPosition((newChannel as NewsChannel).id, (newChannel as NewsChannel).rawPosition, (newChannel as NewsChannel).type, executor_target);
+		} else if (oldChannel.permissionOverwrites !== (newChannel as NewsChannel).permissionOverwrites) {
+			// permissionOverwrites is a Map with the roles that are being filtered
+			// There will always be the @everyone role
+			database.UpdateChannelPermissions((newChannel as NewsChannel).id, oldChannel.permissionOverwrites, (newChannel as TextChannel).permissionOverwrites, executor_target)
+		}  else if (oldChannel.name !== (newChannel as NewsChannel).name) {
+			database.UpdateChannelName((newChannel as NewsChannel).id, (newChannel as NewsChannel).name, "news", executor_target)
+		}
 
 	} else {
 		database.AddLog("unkown channel at channelUpdate", LogTypes.guild)
 	}
 });
-
-
