@@ -4,16 +4,15 @@ PARAMETER      TYPE           DESCRIPTION
 message        Message        The deleted message    */
 
 import { Collection, Message, PartialMessage } from "discord.js";
-import { client, ctx, database } from "..";
+import { client, ctx, database, GetFetchLogsSingle } from "..";
 import { WebSocket } from "../WebSocketClient";
+WebSocket
 
 /** MAYBE: Add timeout to delete old entires to prevent a very large data set */
 const DMChanellsSet = new Set<string>();
 
 // Uses PartialMessage otherwise it won't fire for non-cached messages
 client.on("messageDelete", async (message) => {
-	console.log(`message is deleted -> ${message.id}`);
-
 	// Ignore DM deletions
 	if (!message.guild) {
 		database.DeleteMessage(message as PartialMessage);
@@ -21,30 +20,27 @@ client.on("messageDelete", async (message) => {
 		return;
 	}
 
-	database.DeleteMessage(message as PartialMessage);
+	const deletionLog = await GetFetchLogsSingle(message, 'MESSAGE_DELETE');
 
-	// const fetchedLogs = await message.guild.fetchAuditLogs({
-	// 	limit: 1,
-	// 	type: 'MESSAGE_DELETE',
-	// });
-	// const deletionLog = fetchedLogs.entries.first();
-	// if (!deletionLog) {
-	// 	database.DeleteMessage(message as PartialMessage);
-	// 	return // No logs for this deletion
-	// }
+	if (!deletionLog) {
+		database.DeleteMessage(message as PartialMessage);
+	} else {
+		const { executor, target } = deletionLog;
 
-	return // No logs for this deletion
+		if ((target as PartialMessage).id === message.id) {
+			// Log matches the created channel
+			database.DeleteMessage(message as PartialMessage, executor.id);
+		} else {
+			// TODO: We don't know the author of the message if it is not cached.
+			// There is a chance we have that message in our db and know the author
+			// In this case we can safelly find the executor.
+			// REMINDER: own mesage deletion WILL NOT TRIGGER ANY LOGS
+			database.DeleteMessage(message as PartialMessage);
+		}
+	}
+	console.log(`message is deleted -> ${message.id}`);
 
-	// const { executor, target } = deletionLog;
-	// if (deletionLog.id === message.id) {
-	// 	// TODO: FIX
-	// 	// We know who deleted the message
-	// 	database.DeleteMessageExecutor(message as PartialMessage, executor.id, deletionLog.createdTimestamp);
-	// } else {
-	// 	// The log doesn't match up with the action.
-	// 	// We don't know who deleted the message
-	// 	database.DeleteMessage(message as PartialMessage);
-	// }
+	return
 });
 
 // messageDeleteBulk
@@ -102,7 +98,7 @@ client.on("messageUpdate", async (oldMessage, newMessage) => {
 			// There is a very high possiblity that no fields will be returned
 			// TODO: There is a possibility the user was not recorded when the message was sent
 			// AND that user is no longer in the channel(and) causing an error
-			if (!newMessage.author) 
+			if (!newMessage.author)
 				newMessage = await newMessage.fetch()
 
 			// We don't have that message in our DB
@@ -158,7 +154,16 @@ client.on("message", async (msg) => {
 	if (msg.type === "DEFAULT") {
 		database.AddMessage(msg);
 		// send the message to all clients
-		WebSocket.send(msg.content);
+		WebSocket.send(JSON.stringify({
+			message:
+			{
+				id: msg.id,
+				guild_id: msg.guild?.id,
+				channel_id: msg.channel.id,
+				content: msg.content,
+				author: msg.author.id
+			}
+		}));
 
 		return;
 	} else if (msg.type === "PINS_ADD") {
