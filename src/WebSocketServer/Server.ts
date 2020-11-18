@@ -1,7 +1,7 @@
 import ws from "ws";
 import fs from "fs";
 import https from "https";
-import { ctx } from "..";
+// import { ctx } from "..";
 import { NIL as NIL_UUID } from 'uuid';
 import uuid from 'uuid-random';
 
@@ -36,12 +36,18 @@ SSLApp({
 	},
 	open: (ws) => {
 		if (BotIPV6Adress.has(enc.decode(ws.getRemoteAddressAsText()))) {
-			console.log("Bot connected")
+			// console.log(ctx.blueBright("Bot connected"))
+			console.log("bot connected")
+
 			// This client is our bot
 			ws.bot = true;
 		}
 	},
 	message: (ws, message, isBinary) => {
+		// Keep alive messages. Ignore	
+		if(!message.byteLength){
+			return
+		}
 		const DecMessage = enc.decode(message);
 
 		if (ws.bot) {

@@ -22,7 +22,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
 			database.AddVoiceState(EnumVoiceState.channel_join, newState.id, newState.channelID!)
 			return;
 		}
-		HandleVoiceState(oldState, newState, database);
+		await HandleVoiceState(oldState, newState, database);
 	} else if (newState.channel === null) {
 		// User leaves a voice channel
 		database.AddVoiceState(EnumVoiceState.channel_leave, newState.id, oldState.channelID!)
@@ -33,7 +33,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
  * Decides what was the action in the users voice state\
  * muted/defean... etc
  */
-export async function HandleVoiceState(oldState: VoiceState, newState: VoiceState, database: DB) {
+async function HandleVoiceState(oldState: VoiceState, newState: VoiceState, database: DB) {
 	// User is muted/defeaned in any way
 	
 	if ((!oldState.selfDeaf && newState.selfDeaf) ||

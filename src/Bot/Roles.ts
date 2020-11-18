@@ -23,7 +23,7 @@ PARAMETER      TYPE        DESCRIPTION
 oldRole        Role        The role before the update
 newRole        Role        The role after the update    */
 client.on("roleUpdate", (oldRole, newRole) => {
-	// Find all affected rows
+	// Find all affected users
 	const a = client.guilds.cache.get(database.GuildId)!.members.cache.filter(user => user.roles.cache.find(role => role.id === newRole.id)?.id === newRole.id)
 
 	database.UpdateRole(oldRole, newRole);

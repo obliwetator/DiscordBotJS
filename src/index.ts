@@ -1,5 +1,5 @@
 import { token } from "./Config";
-import { Channel, Client, TextChannel, Role, VoiceChannel, CategoryChannel, NewsChannel, StoreChannel, GuildMember } from "discord.js";
+import { Channel, Client, TextChannel, Role, VoiceChannel, CategoryChannel, NewsChannel, StoreChannel, GuildMember, GuildAuditLogsAction, GuildAuditLogs, GuildChannel } from "discord.js";
 const client = new Client({ partials: ['MESSAGE'] });
 import DB, { ChannelRolePermissions, LogTypes } from "./DB/DB";
 const database: DB = new DB();
@@ -39,6 +39,7 @@ const DEBUG_ENABLED = false;
 //     console.log('Bot received: %s', data);
 // });
 
+// TODO: get all guild keys not just the first
 async function handleGuild(): Promise<void> {
 	const GuildKey = client.guilds.cache.firstKey();
 	database.GuildId = GuildKey!;
@@ -76,7 +77,7 @@ async function handleChannels(): Promise<void> {
 
 }
 
-function HandleAddingPermissions<T extends TextChannel | VoiceChannel | StoreChannel | CategoryChannel | NewsChannel>(element: T, a: Map<string, ChannelRolePermissions[]>) {
+function HandleAddingPermissions<T extends GuildChannel | TextChannel | VoiceChannel | StoreChannel | CategoryChannel | NewsChannel>(element: T, a: Map<string, ChannelRolePermissions[]>) {
 	if (element.permissionOverwrites.size > 0) {
 		// Check if there is any permission present
 		element.permissionOverwrites.forEach((permissionOverwrites, key) => {
@@ -103,7 +104,7 @@ function HandleAddingPermissions<T extends TextChannel | VoiceChannel | StoreCha
 	}
 }
 
-function HandleUpdatingPermissions<T extends TextChannel | VoiceChannel | StoreChannel | CategoryChannel | NewsChannel>
+function HandleUpdatingPermissions<T extends GuildChannel | TextChannel | VoiceChannel | StoreChannel | CategoryChannel | NewsChannel>
 	(element: T, Roles: ChannelRolePermissions[], ToAdd: Map<string, ChannelRolePermissions[]>, ToUpdate: Map<string, ChannelRolePermissions[]>) {
 	let j = 0
 
@@ -256,51 +257,17 @@ async function handleChannelRoles(): Promise<void> {
 			a.get(element.channel_id)?.push(element)
 		}
 	})
-
-	client.channels.cache.forEach((element) => {
+	// TODO remove harcoded value and iterrate over ALL guilds
+	client.guilds.cache.get("362257054829641758")!.channels.cache.forEach((element) => {
 		let RoleArr = a.get(element.id)!
-		// TODO: instanceof check are redundant?
 		if (RoleArr === undefined) {
 			// Some channels MAY NOT have permission overrides
 			// We don't have associated that channel with ANY roles
 			// If the channel doesn't have permission overrides we assume its (0,0) for @everyone
-			if (element instanceof TextChannel) {
-				HandleAddingPermissions(element, PermissionsToAdd);
-			}
-			else if (element instanceof VoiceChannel) {
-				HandleAddingPermissions(element, PermissionsToAdd);
-			}
-			else if (element instanceof CategoryChannel) {
-				HandleAddingPermissions(element, PermissionsToAdd);
-			}
-			else if (element instanceof StoreChannel) {
-				HandleAddingPermissions(element, PermissionsToAdd);
-			}
-			else if (element instanceof NewsChannel) {
-				HandleAddingPermissions(element, PermissionsToAdd);
-			}
+			HandleAddingPermissions(element, PermissionsToAdd);
 		} else {
 			// We have a channel with AT LEAST 1 role
-
-			if (element instanceof TextChannel) {
-				HandleUpdatingPermissions(element, RoleArr, PermissionsToAdd, PermissionsToUpdate);
-			}
-			else if (element instanceof VoiceChannel) {
-				HandleUpdatingPermissions(element, RoleArr, PermissionsToAdd, PermissionsToUpdate);
-			}
-			else if (element instanceof CategoryChannel) {
-				HandleUpdatingPermissions(element, RoleArr, PermissionsToAdd, PermissionsToUpdate);
-			}
-			else if (element instanceof StoreChannel) {
-				HandleUpdatingPermissions(element, RoleArr, PermissionsToAdd, PermissionsToUpdate);
-			}
-			else if (element instanceof NewsChannel) {
-				HandleUpdatingPermissions(element, RoleArr, PermissionsToAdd, PermissionsToUpdate);
-			}
-			// DM channel has no permissions 
-			// else if (element instanceof DMChannel) {
-
-			// }
+			HandleUpdatingPermissions(element, RoleArr, PermissionsToAdd, PermissionsToUpdate);
 
 			// Go through all elements and check what's left
 			// The remaining elements need to be deleted from the DB
@@ -386,7 +353,7 @@ client.on("ready", async () => {
 
 	const me = client.guilds.cache.get('362257054829641758')
 	performance.mark("a");
-	 client.guilds.cache.first()?.channels
+	client.guilds.cache.first()?.channels
 	// register guild
 	await handleGuild();
 	// Check all users. Remove, Add, Update
@@ -405,9 +372,6 @@ client.on("ready", async () => {
 	database.AddLog(`Logged in as ${client.user!.tag}!`, LogTypes.general_log);
 
 });
-
-
-
 
 // channelPinsUpdate
 /* Emitted whenever the pins of a channel are updated. Due to the nature of the WebSocket event, not much information can be provided easily here - you need to manually check the pins yourself.
@@ -480,3 +444,17 @@ client.on("rateLimit", (a) => {
 })
 
 client.login(token);
+
+export async function GetFetchLogsSingle<T>(anything: T, type: GuildAuditLogsAction) {
+	const fetchedLogs = await (anything as any).guild.fetchAuditLogs({
+		limit: 1,
+		type: type,
+	}) as GuildAuditLogs;
+
+	const deletionLog = fetchedLogs.entries.first();
+
+	if (!deletionLog)
+		return null;
+	
+	return deletionLog
+}
