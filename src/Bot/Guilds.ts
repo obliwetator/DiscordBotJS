@@ -1,5 +1,5 @@
 import { GuildMember } from "discord.js";
-import { client, database } from "..";
+import { client, database, GetFetchLogsSingle } from "..";
 import { LogTypes } from "../DB/DB";
 
 
@@ -8,6 +8,8 @@ PARAMETER    TYPE               DESCRIPTION
 oldMember    GuildMember        The member before the update
 newMember    GuildMember        The member after the update    */
 client.on("guildMemberUpdate", (oldMember, newMember) => {
+	// TODO: executor
+	// TODO: Logs
 	if (oldMember instanceof GuildMember && newMember instanceof GuildMember) {
 		if (oldMember.nickname !== newMember.nickname) {
 			// Nickname was changed
@@ -67,6 +69,9 @@ client.on("guildBanRemove", (guild, user) => {
 PARAMETER    TYPE         DESCRIPTION
 guild        Guild        The created guild    */
 client.on("guildCreate", (guild) => {
+	// TODO: executor
+	// TODO: Logs
+	// INIT OPERATION HERE
 	console.log(`the client joins a guild`);
 });
 
@@ -83,6 +88,8 @@ client.on("guildDelete", (guild) => {
 PARAMETER     TYPE               DESCRIPTION
 member        GuildMember        The member that has joined a guild    */
 client.on("guildMemberAdd", async (member) => {
+	// TODO: executor
+	// TODO: Logs
 	if (member.user) {
 		// First add global user
 		await database.AddUsers([member] as Array<GuildMember>);
@@ -99,13 +106,27 @@ client.on("guildMemberAdd", async (member) => {
 /* Emitted whenever a member leaves a guild, or is kicked.
 PARAMETER     TYPE               DESCRIPTION
 member        GuildMember        The member that has left/been kicked from the guild    */
-client.on("guildMemberRemove", (member) => {
+client.on("guildMemberRemove", async (member) => {
 	console.log(`a member leaves a guild, or is kicked: ${member.id} => ${member.displayName}`);
 	// TODO: Create dedicated function to delete only 1 user?
-	// TODO: add logic to find the executor
+	// TODO: ADD LOGS
+	const deletionLog = await GetFetchLogsSingle(member, 'MEMBER_KICK');
 	const a = new Set(member.id);
-	database.RemoveGuildMembersFromGuild(a);
+
+	if (!deletionLog) {
+		database.RemoveGuildMembersFromGuild(a);
+	} else {
+		const { executor, target } = deletionLog;
+
+		if ((target as GuildMember).id === member.id) {
+			// Log matches the created channel
+			database.RemoveGuildMembersFromGuild(a, executor.id);
+		} else {
+			database.RemoveGuildMembersFromGuild(a);
+		}
+	}
 });
+
 
 // guildMemberAvailable
 /* Emitted whenever a member becomes available in a large guild.
@@ -147,6 +168,8 @@ PARAMETER     TYPE      DESCRIPTION
 oldGuild      Guild     The guild before the update
 newGuild      Guild     The guild after the update    */
 client.on("guildUpdate", (oldGuild, newGuild) => {
+	// TODO: executor
+	// TODO: Logs
 	console.error(`a guild is updated`);
 	if (oldGuild.name !== newGuild.name) {
 		// guild name was changed
