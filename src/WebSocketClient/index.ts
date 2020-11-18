@@ -1,34 +1,35 @@
 import ws from "ws";
 import { ctx } from "..";
 
-export const WebSocket = new ws("wss://patrykstyla.com:9001");
+let WebSocket: ws
 
-WebSocket.on("open",() => {
-    console.log(ctx.green('Bot socket is ready'))
-});
+function connect() {
+	WebSocket = new ws("wss://patrykstyla.com:9001")
+	WebSocket.onopen = () => {
+		console.log(ctx.green('Bot socket is ready'))
+	};
+	// Bot will not receive messages
+	// WebSocket.onmessage =((event) => {
 
-WebSocket.on("error", (error) => {
-	console.log(ctx.redBright('Websocket error => ', error))
-})
+	// })
 
-WebSocket.on("ping", (data) => {
-    // console.log(ctx.green('Ping'))
-})
+	WebSocket.onerror = (event) => {
+		// Prevents exceptions
+	}
 
-WebSocket.on("pong", (data) => {
-    // console.log(ctx.green('Pong'))
-})
-
-WebSocket.on("unexpected-response", (request, response) => {
-	console.log(ctx.red('unexpected response'))
-})
-
-WebSocket.on("close", (code, reason) => {
-	console.log(ctx.keyword('orange')(`Connection closed with code: ${code} and reason: ${reason}`))
-})
+	WebSocket.onclose = (event) => {
+		setTimeout(() => {
+			connect()	
+		}, 1000);
+	}
+}
 
 setInterval(() => {
-	if (WebSocket.readyState === ws.OPEN) {
-		WebSocket.send("keep alive")
+	if (WebSocket.readyState === WebSocket.OPEN) {
+		WebSocket.send("")
 	}
 }, 25000);
+
+connect()
+
+export { WebSocket }
