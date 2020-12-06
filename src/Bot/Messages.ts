@@ -3,10 +3,11 @@
 PARAMETER      TYPE           DESCRIPTION
 message        Message        The deleted message    */
 
-import { Collection, Message, PartialMessage } from "discord.js";
+import { Collection, GuildEmoji, Message, PartialMessage, User } from "discord.js";
 import { client, ctx, database, GetFetchLogsSingle } from "..";
 import { WebSocket } from "../WebSocketClient";
-WebSocket
+import { IMessageTypeEnum, IBotMessage } from "../../../DiscordWeb/src/components/Interfaces";
+import "../helper/Strignify"
 
 /** MAYBE: Add timeout to delete old entires to prevent a very large data set */
 const DMChanellsSet = new Set<string>();
@@ -19,15 +20,16 @@ client.on("messageDelete", async (message) => {
 		console.log('Priv Message Deleted');
 		return;
 	}
-
 	const deletionLog = await GetFetchLogsSingle(message, 'MESSAGE_DELETE');
+	let executor: User | null = null, target: any | null = null
+
 
 	if (!deletionLog) {
 		database.DeleteMessage(message as PartialMessage);
 	} else {
-		const { executor, target } = deletionLog;
+		({ executor, target } = { executor: deletionLog.executor, target: deletionLog.target! });
 
-		if ((target as PartialMessage).id === message.id) {
+		if ((target as Message).id === message.id) {
 			// Log matches the created channel
 			database.DeleteMessage(message as PartialMessage, executor.id);
 		} else {
@@ -38,6 +40,17 @@ client.on("messageDelete", async (message) => {
 			database.DeleteMessage(message as PartialMessage);
 		}
 	}
+
+	WebSocket.send(JSON.stringify<IBotMessage>({
+		p: {
+			t: IMessageTypeEnum.MessegeDelete,
+			channel_id: message.channel.id,
+			id: message.id,
+			guild_id: message.guild.id,
+			executor: executor ? executor.id : null,
+			is_deleted: true
+		}
+	}));
 	console.log(`message is deleted -> ${message.id}`);
 
 	return
@@ -81,7 +94,6 @@ client.on("messageDeleteBulk", async (messages) => {
 	database.DeleteMessages(messages as Collection<string, PartialMessage>);
 });
 
-// messageUpdate
 /* Emitted whenever a message is updated - e.g. embed or content change.
 PARAMETER     TYPE           DESCRIPTION
 oldMessage    Message        The message before the update
@@ -89,9 +101,11 @@ newMessage    Message        The message after the update
 Realisticallty only the message content will be changed by a user.
 Bots can eddit embeds and attachments but that wont be supported(?)
 */
+// TODO: Executor
 client.on("messageUpdate", async (oldMessage, newMessage) => {
+	let executor: any = null
 	if (oldMessage.content === null) {
-		// Updating messages that are not cached do not generate any data(expect ID) for oldMessage
+		// Updating messages that are not cached do not generate any data(except ID) for oldMessage
 		// Try to find the message in our DB
 		const DBMessage = await database.GetMessage(newMessage.id);
 		if (!DBMessage[0]) {
@@ -103,23 +117,60 @@ client.on("messageUpdate", async (oldMessage, newMessage) => {
 
 			// We don't have that message in our DB
 			// Add the new message(edit) as is.
+			// Return since we don't know what chnaged from the previous message
 			database.AddMessage(newMessage as Message);
+			return;
 		} else {
+			if (DBMessage[0].content !== newMessage.content) {
+				// we have the message. Update it and add a log
+				database.UpdateMessage(DBMessage[0], newMessage as Message);
+				WebSocket.send(JSON.stringify<IBotMessage>({
+					p: {
+						t: IMessageTypeEnum.MessageEdit,
+						channel_id: DBMessage[0].channel_id,
+						id: newMessage.id,
+						guild_id: newMessage.guild!.id,
+						executor: executor ? executor.id : null,
+						content: newMessage.content!,
+						is_edited: true
+					}
+				}))
+			} else if (DBMessage[0].is_pinned !== newMessage.pinned) {
+				// Message was pinned/unpinned
+				if (newMessage.pinned) {
+					// Pinned
+				} else {
+					// Unpinned
+				}
+			}
+		}
+		return
+	} else {
+		// message is cached
+		if (oldMessage.content !== newMessage.content) {
 			// we have the message. Update it and add a log
-			database.UpdateMessage(DBMessage[0], newMessage as Message);
+			database.UpdateMessageAPI(oldMessage as Message, newMessage as Message);
+			WebSocket.send(JSON.stringify<IBotMessage>({
+				p: {
+					t: IMessageTypeEnum.MessageEdit,
+					channel_id: newMessage.channel.id,
+					id: newMessage.id,
+					guild_id: newMessage.guild!.id,
+					executor: executor ? executor.id : null,
+					content: newMessage.content!,
+					is_edited: true
+				}
+			}))
+		} else if (oldMessage.pinned !== newMessage.pinned) {
+			// Message was pinned/unpinned
+			if (newMessage.pinned) {
+				// Pinned
+			} else {
+				// Unpinned
+			}
 		}
 	}
-	if (oldMessage.content !== newMessage.content) {
-		database.UpdateMessageAPI(oldMessage as Message, newMessage as Message);
-		// Content was changed
-	} else if (oldMessage.pinned !== newMessage.pinned) {
-		// Message was pinned/unpinned
-		if (newMessage.pinned) {
-			// Pinned
-		} else {
-			// Unpinned
-		}
-	}
+
 });
 
 client.on("message", async (msg) => {
@@ -151,14 +202,15 @@ client.on("message", async (msg) => {
 		msg.reply("Some placeholder functionality");
 		return;
 	}
+
 	if (msg.type === "DEFAULT") {
 		database.AddMessage(msg);
 		// send the message to all clients
-		WebSocket.send(JSON.stringify({
-			message:
-			{
+		WebSocket.send(JSON.stringify<IBotMessage>({
+			p: {
+				t: IMessageTypeEnum.Message,
 				id: msg.id,
-				guild_id: msg.guild?.id,
+				guild_id: msg.guild?.id!,
 				channel_id: msg.channel.id,
 				content: msg.content,
 				author: msg.author.id

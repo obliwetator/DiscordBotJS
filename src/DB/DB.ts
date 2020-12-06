@@ -1,4 +1,4 @@
-import { Pool, createPool, createConnection, Connection } from "mysql";
+import { Pool, createPool, createConnection, Connection, MysqlError } from "mysql";
 import { host, password, username } from "../Config";
 import {
 	CategoryChannel,
@@ -98,12 +98,18 @@ class DB {
 
 		await this.GetQuery(query);
 	}
-	public async UpdateVoiceChannelUserLimit(newChannel: VoiceChannel) {
+	public async UpdateVoiceChannelUserLimit(newChannel: VoiceChannel, executor: string | null) {
+		// TODO:
+		const UpdateChannelUserLimit = `INSERT INTO log__channels (channel_id, channel_type, type, executor) VALUES ('${newChannel.id}', (SELECT types FROM channels WHERE channel_id = '${newChannel.id}'), 'user_limit', '${executor ? executor : "NULL"}')`
+
 		let sql = `UPDATE channels SET user_limit = ${newChannel.userLimit} WHERE channel_id = '${newChannel.id}';`
 
 		this.GetQuery(sql);
 	}
-	public async UpdateVoiceChannelBitrate(newChannel: VoiceChannel) {
+	public async UpdateVoiceChannelBitrate(newChannel: VoiceChannel, executor: string | null) {
+
+		const UpdateChannelBitrate = `INSERT INTO log__channels (channel_id, channel_type, type, executor) VALUES ('${newChannel.id}', (SELECT types FROM channels WHERE channel_id = '${newChannel.id}'), 'name', '${executor ? executor : "NULL"}')`
+
 		let sql = `UPDATE channels SET bitrate = '${newChannel.bitrate}' WHERE channel_id = '${newChannel.id}';`
 
 		this.GetQuery(sql);
@@ -115,10 +121,10 @@ class DB {
 
 		await this.GetQuery(UpdateMessage + UpdateMessageLog)
 	}
-	public async UpdateMessageAPI(DBMessage: Message, newMessage: Message) {
+	public async UpdateMessageAPI(OldMessage: Message, newMessage: Message) {
 		// Id, Author, ChannelId and is_deleted CANNOT be changed
 		let UpdateMessage = `UPDATE channel_messages SET content = '${newMessage.content}', is_pinned = ${newMessage.pinned ? 1 : 0}, is_edited = 1 WHERE id = '${newMessage.id}';`
-		let UpdateMessageLog = `INSERT INTO log__channel_messages (message_id, type, og_message) VALUES ('${newMessage.id}', 'edit', '${DBMessage.content}');`
+		let UpdateMessageLog = `INSERT INTO log__channel_messages (message_id, type, og_message) VALUES ('${newMessage.id}', 'edit', '${OldMessage.content}');`
 
 		await this.GetQuery(UpdateMessage + UpdateMessageLog)
 	}
@@ -216,27 +222,35 @@ class DB {
 
 		await this.GetQuery(sql)
 	}
-	public async UpdateTextChannelNsfw(channelId: string, nsfw: boolean) {
+	public async UpdateTextChannelNsfw(channelId: string, nsfw: boolean, executor: string | null) {
 		if (DEBUG_LOG_ENABLED.ChannelUpdate.nsfw) {
 			console.log(`Channel id: ${channelId} has set nsfw to ${nsfw}`)
 		}
+		//TODO:
+		const UpdateChannelNSFW = `INSERT INTO log__channels (channel_id, channel_type, type, executor) VALUES ('${channelId}', (SELECT types FROM channels WHERE channel_id = '${channelId}'), 'nsfw', '${executor ? executor : "NULL"}')`
+
 
 		const sql = `UPDATE channels SET nsfw = '${nsfw}' WHERE channel_id = '${channelId}';`
 
 		await this.GetQuery(sql)
 	}
-	public async UpdateTextChannelRateLimit(channelId: string, rateLimitPerUser: number) {
+	public async UpdateTextChannelRateLimit(channelId: string, rateLimitPerUser: number, executor: string | null) {
 		if (DEBUG_LOG_ENABLED.ChannelUpdate.rateLimit) {
 			console.log(`Channel id: ${channelId} has set ratelimit to ${rateLimitPerUser}`)
 		}
+		// TODO:
+		const UpdateChannelRateLimit = `INSERT INTO log__channels (channel_id, channel_type, type, executor) VALUES ('${channelId}', (SELECT types FROM channels WHERE channel_id = '${channelId}'), 'rate_limit', '${executor ? executor : "NULL"}')`
 		const sql = `UPDATE channels SET rate_limit_per_user = '${rateLimitPerUser}' WHERE channel_id = '${channelId}';`
 
 		await this.GetQuery(sql)
 	}
-	public async UpdateTextChannelTopic(channelId: string, topic: string | null) {
+	public async UpdateTextChannelTopic(channelId: string, topic: string | null, executor: string | null) {
 		if (DEBUG_LOG_ENABLED.ChannelUpdate.topic) {
 			console.log(`Channel id: ${channelId} has set topic to ${topic}`)
 		}
+		// TODO:
+		const UpdateChannelTopic = `INSERT INTO log__channels (channel_id, channel_type, type, executor) VALUES ('${channelId}', (SELECT types FROM channels WHERE channel_id = '${channelId}'), 'topic', '${executor ? executor : "NULL"}')`
+
 		const sql = `UPDATE channels SET topic = 'topic' WHERE channel_id = '${channelId}';`
 
 		await this.GetQuery(sql)
@@ -246,7 +260,7 @@ class DB {
 	 * og_deny and _allow log the values BEFORE the change. Current values will be in the channel_permissions
 	 * Except when deleting, which will list both values
 	 */
-	public async UpdateChannelPermissions(channelId: string, permissionOverwritesOld: Collection<string, PermissionOverwrites>, permissionOverwritesNew: Collection<string, PermissionOverwrites>) {
+	public async UpdateChannelPermissions(channelId: string, permissionOverwritesOld: Collection<string, PermissionOverwrites>, permissionOverwritesNew: Collection<string, PermissionOverwrites>, executor: string | null) {
 		if (DEBUG_LOG_ENABLED.ChannelUpdate.permissions) {
 			permissionOverwritesNew.forEach((element, key) => {
 				console.log(`Permission updated for channel id: ${channelId} for the permission: ${key}`)
@@ -257,9 +271,6 @@ class DB {
 		let type: "add" | "remove" | "update_deny" | "update_allow" | "update_both"
 		let UpdateAllowIndex = 1 // Defaults to NULL
 		let UpdateDenyIndex = 1
-
-		// TODO: Add executor
-		let executor: string; //temp
 
 		let Update: [number, string][] = [[0, "NULL"], [0, "NULL"]];
 
@@ -283,9 +294,9 @@ class DB {
 
 				if (!permissionOverwritesOld.has(key)) {
 					// permissions don't match add that permission
-					const sql = `INSERT INTO channel_permissions (channel_id, role_id, type, allow_bitfield, deny_bitfield) VALUES ('${channelId}', '${key}', 'role', '${element.allow.bitfield}', '${element.deny.bitfield}');`
-
-					this.GetQuery(`INSERT INTO log__channel_permissions (role_id, channel_id, executor, type, og_allow, og_deny) VALUES ('${element.id}', '${channelId}', ${executor ? `'${executor}'` : "NULL"}, 'add', NULL, NULL);` + sql)
+					const Insert_channel_permissions = `INSERT INTO channel_permissions (channel_id, role_id, type, allow_bitfield, deny_bitfield) VALUES ('${channelId}', '${key}', 'role', '${element.allow.bitfield}', '${element.deny.bitfield}');`
+					const Insert_log_channel_permissions = `INSERT INTO log__channel_permissions (role_id, channel_id, executor, type, og_allow, og_deny) VALUES ('${element.id}', '${channelId}', ${executor ? `'${executor}'` : "NULL"}, 'add', NULL, NULL);`
+					this.GetQuery(Insert_channel_permissions + Insert_log_channel_permissions);
 					return;
 				}
 
@@ -399,6 +410,7 @@ class DB {
 		this.GetQuery(AddRole);
 	}
 	public pool: Pool;
+	// This wont work with more than 1 guild
 	GuildId: string;
 	constructor() {
 		this.pool = createPool({
@@ -419,15 +431,23 @@ class DB {
 	// 		this.pool.query(query);
 	// 	});
 	// }
-	private async GetQuery(query: string): Promise<[]> {
-		return new Promise((resolve, reject) => {
+	private async GetQuery<T>(query: string): Promise<T[]> {
+		return new Promise<T[]>((resolve, reject) => {
 			this.pool.query(query, (error, results) => {
 				if (error) {
 					reject(error);
-				}
+				} 
 				resolve(results);
 			});
-		});
+		}).then((value) => {
+			return value
+		}).catch((error: MysqlError): any => {
+			this.LogDatabaseError(error)
+		})
+	}
+
+	public async LogDatabaseError(error: MysqlError) {
+		await this.GetQuery(`INSERT INTO errors (error_object) VALUES (${this.pool.escape(JSON.stringify(error))})`)
 	}
 
 	private async GetQueryArg(query: string, arg: Array<unknown>): Promise<[]> {
@@ -1001,7 +1021,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 
 	// GuildMember is removed from a guild. That member will be removed from that guild
 	// BUT the User will stay in the databse as he may be in other guild
-	public async RemoveGuildMembersFromGuild(GuildMember: Set<string>) {
+	public async RemoveGuildMembersFromGuild(GuildMember: Set<string>, executor: string | null = null) {
 		let RemoveUsersFromGuild = `DELETE FROM user_to_guild WHERE guild_id = ${this.GuildId}`;
 		GuildMember.forEach((element) => {
 			RemoveUsersFromGuild += ` AND user_id = ${element}`;
@@ -1054,31 +1074,17 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 	 *Partial messages only guarantees the id\
 	 *When deleting messages we only care about the deleted message and we don't need the rest of information
 	*/
-	public async DeleteMessage(msg: PartialMessage) {
+	public async DeleteMessage(msg: PartialMessage, executor: string | null = null) {
 		if (DEBUG_LOG_ENABLED.DeleteMessage) {
 			console.log("Message Deleted =>", msg);
 		}
 		// Updates exisiting message or adds a new entry with the three properties provided and insert a log entry
-		const DeleteProcedure = `CALL delete_message('${msg.id}', '${msg.channel.id}', 'UNKOWN')`;
+		const DeleteProcedure = `CALL delete_message('${msg.id}', '${msg.channel.id}', 'UNKOWN', '${executor ? executor : "NULL"}')`;
 
-		// const UpdateDeleteMessageQuery = `UPDATE channel_messages SET is_deleted=1 WHERE id = '${msg.id}';`;
-		// const DeleteMessageQuery = `INSERT INTO channel_messages_deleted (message_id, deleted_at) VALUES ('${msg.id}');`
 
 		this.GetQuery(DeleteProcedure);
 	}
-	/**  
-	 * Same as base function but we know who deleted the message
-	*/
-	public async DeleteMessageExecutor(msg: PartialMessage, executor = "", timestamp: number): Promise<void> {
-		if (DEBUG_LOG_ENABLED.DeleteMessageExecutor) {
-			console.log(`Message Deleted, Executor: ${executor} =>`, msg);
-		}
 
-		const DeleteMessageQuery = `UPDATE channel_messages SET is_deleted=1 WHERE id = '${msg.id}';`;
-		const AddExecutor = `INSERT INTO channel_messages_deleted (message_id, executor, deleted_at) VALUES ('${msg.id}', '${executor}', '${timestamp}');`
-
-		this.GetQuery(`${DeleteMessageQuery} ${AddExecutor}`);
-	}
 	/** 
 	*Partial messages only guarantees the id\
 	*When deleting messages we only care about the deleted message and we don't need the rest of information
@@ -1155,10 +1161,12 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 		this.GetQuery(UpdateGuildmemberNickname);
 	}
 
-	public async UpdateChannelPosition(channelId: string, newPos: number, type: "text" | "dm" | "voice" | "group" | "category" | "news" | "store" | "unknown") {
+	public async UpdateChannelPosition(channelId: string, newPos: number, type: "text" | "dm" | "voice" | "group" | "category" | "news" | "store" | "unknown", executor: string | null) {
 		if (DEBUG_LOG_ENABLED.ChannelUpdate.position) {
 			console.log(`New Channel Position => ${newPos} for channel: ${channelId}`)
 		}
+		// TODO:
+		const UpdateChannelPosition = `INSERT INTO log__channels (channel_id, channel_type, type, executor) VALUES ('${channelId}', (SELECT types FROM channels WHERE channel_id = '${channelId}'), 'position', '${executor ? executor : "NULL"}')`
 
 		if (type === "text") {
 			await this.GetQuery(`UPDATE channels SET position='${newPos}' WHERE channel_id='${channelId}';`)
@@ -1173,10 +1181,12 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 		}
 	}
 
-	public async UpdateChannelName(channelId: string, name: string, type: "text" | "dm" | "voice" | "group" | "category" | "news" | "store" | "unknown") {
+	public async UpdateChannelName(channelId: string, name: string, type: "text" | "dm" | "voice" | "group" | "category" | "news" | "store" | "unknown", executor: string | null) {
 		if (DEBUG_LOG_ENABLED.ChannelUpdate.name) {
 			console.log(`New Channel name => ${name} for channel: ${channelId}`)
 		}
+		// TODO:
+		const UpdateChannelName = `INSERT INTO log__channels (channel_id, channel_type, type, executor) VALUES ('${channelId}', (SELECT types FROM channels WHERE channel_id = '${channelId}'), 'name', '${executor ? executor : "NULL"}')`
 
 		if (type === "text") {
 			await this.GetQuery(`UPDATE channels SET name='${name}' WHERE channel_id='${channelId}';`)
@@ -1191,10 +1201,10 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 		}
 	}
 
-	public GetDMChannel(channel: DMChannel): Promise<ChannelsInterface[]> {
+	public async GetDMChannel(channel: DMChannel): Promise<ChannelsInterface[]> {
 		const GetDMChannelQuery = `SELECT channel_id FROM channels WHERE channel_id = ${channel.id}`
 
-		const a = this.GetQuery(GetDMChannelQuery)
+		const a = await this.GetQuery<ChannelsInterface>(GetDMChannelQuery)
 
 		return a
 	}

@@ -8,6 +8,10 @@ import { LogTypes } from "../DB/DB";
 // This event is unreliable with a DM channel. It creates a race condition with on."message" 
 // which always finishes first for the first message sent
 client.on("channelCreate", async (channel) => {
+	if (channel.type === "dm") {
+		// DM channels are handled in the message listener
+		return;
+	}
 	const deletionLog = await GetFetchLogsSingle(channel, 'CHANNEL_CREATE');
 
 	if (!deletionLog) {
