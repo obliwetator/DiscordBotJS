@@ -21,7 +21,7 @@
 		"strict": true
 	},
 	"include": [
-		"src/**/*"
+		"src/**/*", "../WebSockerServer/Server.ts", "../WebSockerServer/WebSocketServer/Server.ts"
 	],
 	"exclude": [
 		"node_modules"
