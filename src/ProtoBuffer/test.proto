@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package DiscordBotJS;
+
+message BotResponse {
+	string id = 1;
+	string guild_id = 2;
+	string display_hex_color = 3;
+	message BotMessageAttachment {
+		string id = 1;
+		string url = 2;
+		string name = 3;
+	}
+	message MessageEmbed {
+		string id = 1;	
+	}
+	message BotMessage {
+		string channel_id = 1;
+		string content = 2;
+		string author = 3;
+		string nickname = 4;
+		string username = 5;
+		map<string, BotMessageAttachment> attachments = 8 [default = null];
+		repeated MessageEmbed embeds = 9 [packed=true];
+	}
+	BotMessage botMessage = 4;
+
+	message BotDeleteMessage {
+		string channel_id = 1;
+		bool is_deteled = 4;
+		string executor = 5;
+	}
+	BotDeleteMessage botDeleteMessage = 5;
+
+	message BotEditMessage {
+		string channel_id = 1;
+		string content = 2;
+		bool is_edited = 3;
+		string executor = 4;
+	}
+	BotEditMessage botEditMessage = 6;
+
+	message BotVoiceMessage {
+		enum VoiceState {
+			mute = 0;
+			unmute = 1;
+			deaf = 2;
+			undeafen = 3;
+			server_mute = 4;
+			server_unmute = 5;
+			server_deaf = 6;
+			server_undeafen = 7;
+			video_start = 8;
+			video_stop = 9;
+			streaming_start = 10;
+			streaming_stop = 11;
+			channel_join = 12;
+			channel_leave = 13;
+		}
+		VoiceState voice_state = 1;
+		string channel_id = 2;
+		string executor = 3;
+	}
+
+	BotVoiceMessage botVoiceMessage = 7;
+}
