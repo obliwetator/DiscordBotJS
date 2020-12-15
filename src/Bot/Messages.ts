@@ -1,17 +1,17 @@
-// messageDelete
-/* Emitted whenever a message is deleted.
-PARAMETER      TYPE           DESCRIPTION
-message        Message        The deleted message    */
-
-import { Collection, GuildEmoji, Message, PartialMessage, User } from "discord.js";
+import { Collection, GuildEmoji, Message, MessageAttachment, PartialMessage, User } from "discord.js";
 import { client, ctx, database, GetFetchLogsSingle } from "..";
 import { WebSocket } from "../WebSocketClient";
-import { IMessageTypeEnum, IBotMessage } from "../../../DiscordWeb/src/components/Interfaces";
-import "../helper/Strignify"
+import { IMessageTypeEnum, IBotMessage } from "../../src/Interfaces";
+import "../helper/stringify"
+import { DiscordBotJS } from "../../compiled";
 
 /** MAYBE: Add timeout to delete old entires to prevent a very large data set */
 const DMChanellsSet = new Set<string>();
 
+// messageDelete
+/* Emitted whenever a message is deleted.
+PARAMETER      TYPE           DESCRIPTION
+message        Message        The deleted message    */
 // Uses PartialMessage otherwise it won't fire for non-cached messages
 client.on("messageDelete", async (message) => {
 	// Ignore DM deletions
@@ -41,16 +41,18 @@ client.on("messageDelete", async (message) => {
 		}
 	}
 
-	WebSocket.send(JSON.stringify<IBotMessage>({
-		p: {
-			t: IMessageTypeEnum.MessegeDelete,
+	const BotMessage = DiscordBotJS.BotResponse.create({
+		id: message.id,
+		guild_id: message.guild!.id!,
+		botDeleteMessage: {
 			channel_id: message.channel.id,
-			id: message.id,
-			guild_id: message.guild.id,
-			executor: executor ? executor.id : null,
-			is_deleted: true
+			executor: executor?.id,
+			is_deteled: true
 		}
-	}));
+	})
+	const Encoded = DiscordBotJS.BotResponse.encode(BotMessage).finish();
+	WebSocket.send(Encoded)
+
 	console.log(`message is deleted -> ${message.id}`);
 
 	return
@@ -119,22 +121,25 @@ client.on("messageUpdate", async (oldMessage, newMessage) => {
 			// Add the new message(edit) as is.
 			// Return since we don't know what chnaged from the previous message
 			database.AddMessage(newMessage as Message);
+			// TODO: Send the message back??
 			return;
 		} else {
 			if (DBMessage[0].content !== newMessage.content) {
 				// we have the message. Update it and add a log
 				database.UpdateMessage(DBMessage[0], newMessage as Message);
-				WebSocket.send(JSON.stringify<IBotMessage>({
-					p: {
-						t: IMessageTypeEnum.MessageEdit,
+				
+				const BotMessage = DiscordBotJS.BotResponse.create({
+					id: newMessage.id,
+					guild_id: newMessage.guild!.id,
+					botEditMessage: {
 						channel_id: DBMessage[0].channel_id,
-						id: newMessage.id,
-						guild_id: newMessage.guild!.id,
-						executor: executor ? executor.id : null,
+						executor: executor?.id,
 						content: newMessage.content!,
 						is_edited: true
 					}
-				}))
+				})
+				const Encoded = DiscordBotJS.BotResponse.encode(BotMessage).finish();
+				WebSocket.send(Encoded)
 			} else if (DBMessage[0].is_pinned !== newMessage.pinned) {
 				// Message was pinned/unpinned
 				if (newMessage.pinned) {
@@ -150,17 +155,18 @@ client.on("messageUpdate", async (oldMessage, newMessage) => {
 		if (oldMessage.content !== newMessage.content) {
 			// we have the message. Update it and add a log
 			database.UpdateMessageAPI(oldMessage as Message, newMessage as Message);
-			WebSocket.send(JSON.stringify<IBotMessage>({
-				p: {
-					t: IMessageTypeEnum.MessageEdit,
+			const BotMessage = DiscordBotJS.BotResponse.create({
+				id: newMessage.id,
+				guild_id: newMessage.guild!.id,
+				botEditMessage: {
 					channel_id: newMessage.channel.id,
-					id: newMessage.id,
-					guild_id: newMessage.guild!.id,
-					executor: executor ? executor.id : null,
+					executor: executor?.id,
 					content: newMessage.content!,
 					is_edited: true
 				}
-			}))
+			})
+			const Encoded = DiscordBotJS.BotResponse.encode(BotMessage).finish();
+			WebSocket.send(Encoded)
 		} else if (oldMessage.pinned !== newMessage.pinned) {
 			// Message was pinned/unpinned
 			if (newMessage.pinned) {
@@ -206,17 +212,27 @@ client.on("message", async (msg) => {
 	if (msg.type === "DEFAULT") {
 		database.AddMessage(msg);
 		// send the message to all clients
-		WebSocket.send(JSON.stringify<IBotMessage>({
-			p: {
-				t: IMessageTypeEnum.Message,
-				id: msg.id,
-				guild_id: msg.guild?.id!,
-				channel_id: msg.channel.id,
-				content: msg.content,
-				author: msg.author.id
-			}
-		}));
 
+		const BotMessage = DiscordBotJS.BotResponse.create({
+			id: msg.id,
+			guild_id: msg.guild!.id,
+			botMessage: {
+				channel_id: msg.channel.id,
+				content: msg.content, 
+				author: msg.author.id,
+				username: msg.author.username,
+				nickname: msg.guild!.members.cache.get(msg.author.id)!.nickname,
+				attachments: msg.attachments.size > 0 ? {[msg.attachments.first()!.id] : {
+					id: msg.attachments.first()!.id,
+					name: msg.attachments.first()!.name,
+					url: msg.attachments.first()!.url
+				}} : null
+			}
+		})
+
+		const Encoded = DiscordBotJS.BotResponse.encode(BotMessage).finish();
+
+		WebSocket.send(Encoded)
 		return;
 	} else if (msg.type === "PINS_ADD") {
 		database.UpdateChannelPins(msg);
@@ -263,3 +279,15 @@ client.on("typingStart", (channel, user) => {
 	console.log(`${user.id} has started typing`);
 
 });
+
+function replacer(this: any, key: any, value: any) {
+	const originalObject = this[key];
+	if(originalObject instanceof Map) {
+	  return {
+			dataType: 'Collection',
+			value: Array.from(originalObject.entries()), // or with spread: value: [...originalObject]
+	  };
+	} else {
+	  return value;
+	}
+  }
