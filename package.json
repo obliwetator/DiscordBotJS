@@ -8,8 +8,8 @@
 		"test": "echo \"Error: no test specified\" && exit 1",
 		"prod": "tsc && node .",
 		"css": "npx tailwindcss-cli@latest build ./public/css/main.css -o ./dist/main.css",
-		"proto": "pbjs -t static-module -w commonjs -o compiled.js ./src/ProtoBuffer/test.proto --keep-case && npx pbts -o compiled.d.ts compiled.js",
-		"bundle": "pbjs -t json-module -w commonjs -o bundle.js ./src/ProtoBuffer/test.proto --keep-case && pbjs -t static-module ./src/ProtoBuffer/test.proto --keep-case | pbts -o bundle.d.ts -"
+		"proto": "pbjs -t static-module -w commonjs -o ./ProtoOutput/compiled.js ./src/ProtoBuffer/test.proto --keep-case && npx pbts -o ./ProtoOutput/compiled.d.ts ./ProtoOutput/compiled.js",
+		"bundle": "pbjs -t json-module -w commonjs -o ./ProtoOutput/bundle.js ./src/ProtoBuffer/test.proto --keep-case && pbjs -t static-module ./src/ProtoBuffer/test.proto --keep-case | pbts -o ./ProtoOutput/bundle.d.ts -"
 	},
 	"repository": {
 		"type": "git",

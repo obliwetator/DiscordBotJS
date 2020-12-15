@@ -1,6 +1,6 @@
 src/Config.ts
 /prisma
-
+/ProtoOutput
 # Logs
 logs
 *.log
