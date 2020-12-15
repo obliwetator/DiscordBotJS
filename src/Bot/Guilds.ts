@@ -1,4 +1,4 @@
-import { GuildMember } from "discord.js";
+import { GuildMember, PartialGuildMember, User } from "discord.js";
 import { client, database, GetFetchLogsSingle } from "..";
 import { LogTypes } from "../DB/DB";
 
@@ -7,13 +7,32 @@ import { LogTypes } from "../DB/DB";
 PARAMETER    TYPE               DESCRIPTION
 oldMember    GuildMember        The member before the update
 newMember    GuildMember        The member after the update    */
-client.on("guildMemberUpdate", (oldMember, newMember) => {
+client.on("guildMemberUpdate", async (oldMember, newMember) => {
 	// TODO: executor
 	// TODO: Logs
+	const deletionLog = await GetFetchLogsSingle(newMember, 'MEMBER_UPDATE');
+	
+	if (!deletionLog) {
+		// no logs
+		HandleGuildMemberUpdate(oldMember, newMember, deletionLog);
+	} else {
+		if ((deletionLog.target as User).id === newMember.id) {
+			// target is the same as updated member
+			HandleGuildMemberUpdate(oldMember, newMember, deletionLog.executor)
+		} else {
+			// target doesn't match
+			HandleGuildMemberUpdate(oldMember, newMember)
+		}
+	}
+
+
+});
+
+function HandleGuildMemberUpdate(oldMember: GuildMember | PartialGuildMember, newMember: GuildMember | PartialGuildMember, executor: User | null = null) {
 	if (oldMember instanceof GuildMember && newMember instanceof GuildMember) {
 		if (oldMember.nickname !== newMember.nickname) {
 			// Nickname was changed
-			database.ChangeNickname(newMember);
+			database.ChangeNickname(newMember, executor?.id);
 		}
 		else if (oldMember.roles.cache.size !== newMember.roles.cache.size) {
 			// Role was changed 
@@ -23,7 +42,7 @@ client.on("guildMemberUpdate", (oldMember, newMember) => {
 				for (const key of oldMember.roles.cache) {
 					if (!oldMember.roles.cache.has(key[0])) {
 						RemovedRole = key[0];
-						database.RemoveGuildMemberRole(newMember.id, RemovedRole)
+						database.RemoveGuildMemberRole(newMember.id, RemovedRole, executor?.id)
 						break;
 					}
 				}
@@ -33,7 +52,7 @@ client.on("guildMemberUpdate", (oldMember, newMember) => {
 				for (const key of newMember.roles.cache) {
 					if (!oldMember.roles.cache.has(key[0])) {
 						AddedRole = key[0];
-						database.AddGuildMemberRole(newMember.id, AddedRole)
+						database.AddGuildMemberRole(newMember.id, AddedRole, executor?.id)
 						break;
 					}
 				}
@@ -44,7 +63,7 @@ client.on("guildMemberUpdate", (oldMember, newMember) => {
 			console.log('User changed')
 		}
 	}
-});
+}
 
 // guildBanAdd
 /* Emitted whenever a member is banned from a guild.

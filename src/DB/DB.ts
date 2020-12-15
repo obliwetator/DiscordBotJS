@@ -388,7 +388,7 @@ class DB {
 	/**
 	 * Remove a single role for a single user
 	 */
-	public RemoveGuildMemberRole(id: string, RemovedRole: string): void {
+	public RemoveGuildMemberRole(id: string, RemovedRole: string, executor: string | null = null): void {
 		if (DEBUG_LOG_ENABLED.RoleRemovedFromMember) {
 			console.log(`Role id: ${RemovedRole} has been Removed from user id: ${id}`)
 		}
@@ -400,7 +400,7 @@ class DB {
 	/**
 	 * Add a single role for a single user
 	 */
-	public AddGuildMemberRole(id: string, AddedRole: string): void {
+	public AddGuildMemberRole(id: string, AddedRole: string, executor: string | null = null): void {
 		if (DEBUG_LOG_ENABLED.RoleAddedToMember) {
 			console.log(`Role id: ${AddedRole} has been Added to user id: ${id}`)
 		}
@@ -572,7 +572,7 @@ class DB {
 				console.log(ctx.keyword('orange')(`${value}`));
 			} else if (severity === SeverityEnum.error) {
 				console.log(ctx.red(`${value}`));
-			}
+			} 
 
 		}
 		this.GetQuery(`INSERT INTO log (message, category) VALUES ('${value}', '${type}')`);
@@ -589,7 +589,7 @@ class DB {
 		if (message.embeds.length > 0) {
 			hasEmbed = true;
 			EmbededQuery += `INSERT INTO embedded_messages (id,title, type, description, url, fields, footer, thumbnail, video, image, author, color)\
-VALUES ('${message.id}','${message.embeds[0].title}', '${message.embeds[0].type}', '${message.embeds[0].description}', '${message.embeds[0].url}', '${message.embeds[0].fields}', '${message.embeds[0].footer}', '${message.embeds[0].thumbnail}', '${message.embeds[0].video}', '${message.embeds[0].image}', '${message.embeds[0].author}', '${message.embeds[0].color}');`;
+VALUES ('${message.id}', ${this.pool.escape(message.embeds[0].title)}, '${message.embeds[0].type}', ${ (message.embeds[0].description + '').replace(/[\\"']/g, '\\$&').replace(/\u0000/g, '\\0')}, ${this.pool.escape(message.embeds[0].url)}, '${message.embeds[0].fields}', '${message.embeds[0].footer ? message.embeds[0].footer : "NULL"}', '${message.embeds[0].thumbnail ? message.embeds[0].thumbnail : "NULL"}', '${message.embeds[0].video ? message.embeds[0].video : "NULL"}', '${message.embeds[0].image ? message.embeds[0].image : "NULL"}', '${message.embeds[0].author ? message.embeds[0].author : "NULL"}', '${message.embeds[0].color}');`;
 		}
 		if (message.attachments.size > 0) {
 			hasAttachment = true;
@@ -983,9 +983,9 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 			})
 		}
 		// Add GuildMembers
-		let InsertGuildUser = "INSERT INTO guild_user (user_id, nickname) VALUES";
+		let InsertGuildUser = "INSERT INTO guild_user (user_id, nickname, display_hex_color) VALUES";
 		member.forEach((element) => {
-			InsertGuildUser += `('${element.id}', '${element.nickname ? element.nickname : element.user.username}'),`;
+			InsertGuildUser += `('${element.id}', '${element.nickname ? element.nickname : element.user.username}', '${element.displayHexColor}'),`;
 
 		})
 
@@ -1129,17 +1129,17 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 		this.GetQuery(DeleteMessagesQuery + AddExecutor);
 	}
 
-	public async AddVoiceState(VoiceState: EnumVoiceState, UserId: string, ChannelId: string, Executor = "") {
+	public async AddVoiceState(VoiceState: EnumVoiceState, UserId: string, ChannelId: string, Executor: string | null = null) {
 		if (DEBUG_LOG_ENABLED.VoiceState) {
 			console.log(`State: ${EnumVoiceState[VoiceState]}, User: ${UserId}, Channel: ${ChannelId}`)
 		}
 
-		const VoiceStateQuery = `INSERT INTO log__voice_states (user_id, channel_id, category, executor) VALUES ('${UserId}', '${ChannelId}', '${VoiceState}', ${Executor.length > 0 ? `${Executor}` : "NULL"});`
+		const VoiceStateQuery = `INSERT INTO log__voice_states (user_id, channel_id, category, executor) VALUES ('${UserId}', '${ChannelId}', '${VoiceState}', ${Executor ? `${Executor}` : "NULL"});`
 
 		this.GetQuery(VoiceStateQuery);
 	}
 
-	ChangeNickname(newMember: GuildMember) {
+	ChangeNickname(newMember: GuildMember, executor: string | null = null) {
 		if (DEBUG_LOG_ENABLED.UpdateNickname) {
 			if (newMember.nickname === null) {
 				console.log(`User id: ${newMember.id} Changed to his default username: ${newMember.user.username}`);
@@ -1149,13 +1149,16 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 		}
 
 		let UpdateGuildmemberNickname = ""
+		let UpdateGuildmemberNicknameLog = "";
 
-		// If the NEW nickname is null that mean sthe user reset theit nickname to the default value
+		// If the NEW nickname is null that means  the user reset theit nickname to the default value
 		// The default value is the discord username
 		if (newMember.nickname === null) {
 			UpdateGuildmemberNickname = `UPDATE guild_user SET nickname = '${newMember.user.username}' WHERE user_id = '${newMember.id}';`;
+			UpdateGuildmemberNicknameLog = `INSERT INTO log__guild_users (user_id, guild_id, type, og_value) VALUES ('${newMember.id}', '${newMember.guild.id}', 'nickname', ${newMember.user.username})`
 		} else {
 			UpdateGuildmemberNickname = `UPDATE guild_user SET nickname = '${newMember.nickname}' WHERE user_id = '${newMember.id}';`;
+			UpdateGuildmemberNicknameLog = `INSERT INTO log__guild_users (user_id, guild_id, type, og_value) VALUES ('${newMember.id}', '${newMember.guild.id}', 'nickname', ${newMember.nickname})`
 		}
 
 		this.GetQuery(UpdateGuildmemberNickname);
