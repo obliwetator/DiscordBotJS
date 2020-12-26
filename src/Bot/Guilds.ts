@@ -195,3 +195,9 @@ client.on("guildUpdate", (oldGuild, newGuild) => {
 		database.UpdateGuildName(newGuild.id, newGuild.name);
 	}
 });
+
+
+// Ignore
+// client.on("guildIntegrationsUpdate", (guild) => {
+
+// })

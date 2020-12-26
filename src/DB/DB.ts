@@ -589,7 +589,7 @@ class DB {
 		if (message.embeds.length > 0) {
 			hasEmbed = true;
 			EmbededQuery += `INSERT INTO embedded_messages (id,title, type, description, url, fields, footer, thumbnail, video, image, author, color)\
-VALUES ('${message.id}', ${this.pool.escape(message.embeds[0].title)}, '${message.embeds[0].type}', ${ (message.embeds[0].description + '').replace(/[\\"']/g, '\\$&').replace(/\u0000/g, '\\0')}, ${this.pool.escape(message.embeds[0].url)}, '${message.embeds[0].fields}', '${message.embeds[0].footer ? message.embeds[0].footer : "NULL"}', '${message.embeds[0].thumbnail ? message.embeds[0].thumbnail : "NULL"}', '${message.embeds[0].video ? message.embeds[0].video : "NULL"}', '${message.embeds[0].image ? message.embeds[0].image : "NULL"}', '${message.embeds[0].author ? message.embeds[0].author : "NULL"}', '${message.embeds[0].color}');`;
+VALUES ('${message.id}', ${this.pool.escape(message.embeds[0].title)}, '${message.embeds[0].type}', ${this.pool.escape(message.embeds[0].description, true)}, ${this.pool.escape(message.embeds[0].url)}, '${message.embeds[0].fields}', '${message.embeds[0].footer ? message.embeds[0].footer : "NULL"}', '${message.embeds[0].thumbnail ? message.embeds[0].thumbnail : "NULL"}', '${message.embeds[0].video ? message.embeds[0].video : "NULL"}', '${message.embeds[0].image ? message.embeds[0].image : "NULL"}', '${message.embeds[0].author ? message.embeds[0].author : "NULL"}', '${message.embeds[0].color}');`;
 		}
 		if (message.attachments.size > 0) {
 			hasAttachment = true;
