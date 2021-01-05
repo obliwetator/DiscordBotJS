@@ -3,7 +3,7 @@ import { client, ctx, database, GetFetchLogsSingle } from "..";
 import { WebSocket } from "../WebSocketClient";
 import { IMessageTypeEnum, IBotMessage } from "../../src/Interfaces";
 import "../helper/stringify"
-import { DiscordBotJS } from "../../ProtoOutput/compiled";
+import { DiscordBotJS } from "/home/ubuntu/DiscordBotJS/ProtoOutput/compiled";
 
 /** MAYBE: Add timeout to delete old entires to prevent a very large data set */
 const DMChanellsSet = new Set<string>();

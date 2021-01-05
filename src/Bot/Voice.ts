@@ -3,7 +3,7 @@ import { client, database } from "..";
 import { User, VoiceState } from "discord.js";
 import DB from "../DB/DB";
 import { WebSocket } from "../WebSocketClient";
-import { DiscordBotJS } from "../../ProtoOutput/compiled";
+import { DiscordBotJS } from "/home/ubuntu/DiscordBotJS/ProtoOutput/compiled";
 
 // voiceStateUpdate
 /* Emitted whenever a user changes voice state - e.g. joins/leaves a channel, mutes/unmutes.
