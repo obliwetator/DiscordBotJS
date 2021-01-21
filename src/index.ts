@@ -1,5 +1,5 @@
 import { token } from "./Config";
-import { Channel, Client, TextChannel, Role, VoiceChannel, CategoryChannel, NewsChannel, StoreChannel, GuildMember, GuildAuditLogsAction, GuildAuditLogs, GuildChannel } from "discord.js";
+import { Channel, Client, TextChannel, Role, VoiceChannel, CategoryChannel, NewsChannel, StoreChannel, GuildMember, GuildAuditLogsAction, GuildAuditLogs, GuildChannel, Presence } from "discord.js";
 const client = new Client({ partials: ['MESSAGE'] });
 import DB, { ChannelRolePermissions, LogTypes } from "./DB/DB";
 const database: DB = new DB();
@@ -19,6 +19,8 @@ export { client, database };
 obs;
 
 import chalk from "chalk";
+import { WebSocket } from "./WebSocketClient";
+import { DiscordBotJS } from "../ProtoOutput/compiled";
 
 
 export const ctx = new chalk.Instance({ level: 3 });
@@ -103,7 +105,6 @@ function HandleAddingPermissions<T extends GuildChannel | TextChannel | VoiceCha
 		// No permissions. Do nothing
 	}
 }
-
 function HandleUpdatingPermissions<T extends GuildChannel | TextChannel | VoiceChannel | StoreChannel | CategoryChannel | NewsChannel>
 	(element: T, Roles: ChannelRolePermissions[], ToAdd: Map<string, ChannelRolePermissions[]>, ToUpdate: Map<string, ChannelRolePermissions[]>) {
 	let j = 0
@@ -415,9 +416,18 @@ client.on("error", (error) => {
 PARAMETER    TYPE               DESCRIPTION
 oldMember    GuildMember        The member before the presence update
 newMember    GuildMember        The member after the presence update    */
-// client.on("presenceUpdate", (oldMember, newMember) => {
-//     console.log(`a guild member's presence changes`);
-// });
+client.on("presenceUpdate", (oldMember, newMember) => {
+	// console.log(newMember)
+	const BotPressence = DiscordBotJS.BotResponse.create({
+		id: newMember.userID,
+		guild_id: newMember.guild?.id,
+		botPressenceMessage: {
+			status: newMember.status
+		}
+	})
+	WebSocket.send(DiscordBotJS.BotResponse.encode(BotPressence).finish())
+    console.log(newMember.userID);
+});
 
 // userUpdate
 /* Emitted whenever a user's details (e.g. username) are changed.

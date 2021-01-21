@@ -61,6 +61,15 @@ message BotResponse {
 		string channel_id = 2;
 		string executor = 3;
 	}
-
 	BotVoiceMessage botVoiceMessage = 7;
+
+	message BotPressenceMessage {
+		string status = 0;
+		
+		message Activity {
+
+		}
+	}
+	BotPressenceMessage botPressenceMessage = 8;
+	
 }
