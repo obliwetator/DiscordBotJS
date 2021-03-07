@@ -26,8 +26,6 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
 
 			return;
 		} else {
-			// Plays every time user joins a new channel
-			PlayBossMusic(newState);
 			// User switches channels or anything else
 			await HandleVoiceState(oldState, newState, database);
 		}
@@ -44,9 +42,13 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
  * muted/defean... etc
  */
 async function HandleVoiceState(oldState: VoiceState, newState: VoiceState, database: DB) {
+	// User switches channels
+	if (oldState.channel?.id !== newState.channel?.id) {
+		PlayBossMusic(newState)
+		SendWSVoiceState(DiscordBotJS.BotResponse.BotVoiceMessage.VoiceState.channel_join, newState)
+	}
 	// User is muted/defeaned in any way
-	
-	if ((!oldState.selfDeaf && newState.selfDeaf) ||
+	else if ((!oldState.selfDeaf && newState.selfDeaf) ||
 		(!oldState.selfMute && newState.selfMute) ||
 		(!oldState.serverDeaf && newState.serverDeaf) ||
 		(!oldState.serverMute && newState.serverMute)) {
