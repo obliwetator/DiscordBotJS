@@ -1,6 +1,7 @@
 src/Config.ts
 /prisma
 /ProtoOutput
+/audioClips
 # Logs
 logs
 *.log
