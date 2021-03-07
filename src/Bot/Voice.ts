@@ -11,7 +11,6 @@ PARAMETER    TYPE             DESCRIPTION
 oldMember    GuildMember      The member before the voice state update
 newMember    GuildMember      The member after the voice state update    */
 client.on("voiceStateUpdate", async (oldState, newState) => {
-	
 	// The only way for the properties to be undefined is either
 	// 1) the user to connect for the first time
 	// 2) the bot is connected after a user has joined ( not present in bot chache )
@@ -19,15 +18,21 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
 		// User is still present in the channel
 		// Check what was the action
 		if (oldState.channel === null) {
-			// User Joins a voice channel
+			// User Joins a voice channel FOR THE FIRST TIME
 			database.AddVoiceState(EnumVoiceState.channel_join, newState.id!, newState.channelID!)
-
+			// Plays when user joins a channel for the first time
+			PlayBossMusic(newState);
 			SendWSVoiceState(DiscordBotJS.BotResponse.BotVoiceMessage.VoiceState.channel_join, newState)
 
 			return;
+		} else {
+			// Plays every time user joins a new channel
+			PlayBossMusic(newState);
+			// User switches channels or anything else
+			await HandleVoiceState(oldState, newState, database);
 		}
-		await HandleVoiceState(oldState, newState, database);
 	} else if (newState.channel === null) {
+		
 		// User leaves a voice channel
 		database.AddVoiceState(EnumVoiceState.channel_leave, newState.id!, oldState.channelID!)
 		SendWSVoiceState(DiscordBotJS.BotResponse.BotVoiceMessage.VoiceState.channel_leave, newState)
@@ -182,3 +187,23 @@ export enum EnumVoiceState {
 	channel_leave,
 }
 
+async function PlayBossMusic(newState: VoiceState) {
+	if (newState.member?.id === "183931044829986817") {
+
+		const connection = await newState.member?.voice.channel?.join()!
+
+		// Create a dispatcher
+		const dispatcher = connection.play('/home/ubuntu/DiscordBotJS/audioClips/Dark Souls III Soundtrack OST - Vordt of the Boreal Valley-[AudioTrimmer.com].mp3', { volume : 1.5 });
+
+		dispatcher.on('start', () => {
+		});
+
+		dispatcher.on('finish', () => {
+			// Disconnect when finished playing
+			connection.disconnect()
+		});
+
+		// Always remember to handle errors appropriately!
+		dispatcher.on('error', console.error);
+	}
+}
