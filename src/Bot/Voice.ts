@@ -4,7 +4,9 @@ import { User, VoiceState } from "discord.js";
 import DB from "../DB/DB";
 import { WebSocket } from "../WebSocketClient";
 import { DiscordBotJS } from "/home/ubuntu/DiscordBotJS/ProtoOutput/compiled";
-
+import fs from "fs";
+import FfmpegCommand from 'fluent-ffmpeg'
+import { exec } from "child_process";
 // voiceStateUpdate
 /* Emitted whenever a user changes voice state - e.g. joins/leaves a channel, mutes/unmutes.
 PARAMETER    TYPE             DESCRIPTION
@@ -30,7 +32,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
 			await HandleVoiceState(oldState, newState, database);
 		}
 	} else if (newState.channel === null) {
-		
+
 		// User leaves a voice channel
 		database.AddVoiceState(EnumVoiceState.channel_leave, newState.id!, oldState.channelID!)
 		SendWSVoiceState(DiscordBotJS.BotResponse.BotVoiceMessage.VoiceState.channel_leave, newState)
@@ -46,6 +48,8 @@ async function HandleVoiceState(oldState: VoiceState, newState: VoiceState, data
 	if (oldState.channel?.id !== newState.channel?.id) {
 		PlayBossMusic(newState)
 		SendWSVoiceState(DiscordBotJS.BotResponse.BotVoiceMessage.VoiceState.channel_join, newState)
+
+		return
 	}
 	// User is muted/defeaned in any way
 	else if ((!oldState.selfDeaf && newState.selfDeaf) ||
@@ -92,7 +96,7 @@ async function HandleVoiceState(oldState: VoiceState, newState: VoiceState, data
 		} else if (!newState.serverMute && oldState.serverMute) {
 			const executor = await HandleVoiceStateExecutor(newState)
 			database.AddVoiceState(EnumVoiceState.server_unmute, newState.id!, newState.channelID!, executor)
-			
+
 			SendWSVoiceState(DiscordBotJS.BotResponse.BotVoiceMessage.VoiceState.server_unmute, newState, executor)
 
 		}
@@ -158,7 +162,7 @@ async function HandleVoiceStateExecutor(newState: VoiceState): Promise<string | 
 	}
 }
 
-function SendWSVoiceState(state: DiscordBotJS.BotResponse.BotVoiceMessage.VoiceState, newState: VoiceState, executor: string | null  = null) {
+function SendWSVoiceState(state: DiscordBotJS.BotResponse.BotVoiceMessage.VoiceState, newState: VoiceState, executor: string | null = null) {
 	const State = DiscordBotJS.BotResponse.create({
 		guild_id: newState.guild.id,
 		id: newState.id,
@@ -190,13 +194,39 @@ export enum EnumVoiceState {
 }
 
 async function PlayBossMusic(newState: VoiceState) {
-	if (newState.member?.id === "183931044829986817") {
-
+	if (newState.member?.id === "146638124288704513") {
+		let audioOutputFormat = 'webm'
+		// join the channel the the user is in
 		const connection = await newState.member?.voice.channel?.join()!
+		// Get the audio stream from discord
+		const audio = connection.receiver.createStream(newState.member, { mode: 'pcm', end: 'manual' })
+		// Where the output will be stored
+		var stream = fs.createWriteStream(`/home/ubuntu/DiscordBotJS/audioClips/UserClips/${newState.member!.id}.${audioOutputFormat}`)
+
+		// If we need the raw pcm audio data (s16le)
+		// audio.pipe(fs.createWriteStream(`/home/ubuntu/DiscordBotJS/audioClips/UserClips/${newState.member!.id}`))
+
+		// Can use a file or in our case a stream
+		let command = FfmpegCommand(audio);
+		command.inputFormat('s16le')
+		// the other functions set the output options and it wont work otherwise
+		.inputOptions(['-ar 48000' , '-ac 2'])
+		// When using streams we must specify an output format
+		.outputFormat(audioOutputFormat)
+		// .on('start', function(commandLine) {
+		// 	console.log('Spawned Ffmpeg with command: ' + commandLine);
+		// })
+		// .on('end', function () {
+		// 	console.log('file has been converted succesfully');
+		// })
+		// .on('error', function (err) {
+		// 	console.log('an error happened: ' + err);
+		// })
+		.pipe(stream)
 
 		// Create a dispatcher
-		const dispatcher = connection.play('/home/ubuntu/DiscordBotJS/audioClips/Dark Souls III Soundtrack OST - Vordt of the Boreal Valley-[AudioTrimmer.com].mp3', { volume : 1.5 });
-
+		const dispatcher = connection.play(fs.createReadStream('/home/ubuntu/DiscordBotJS/audioClips/Dark Souls III Soundtrack OST - Vordt of the Boreal Valley-[AudioTrimmer.com].webm'), { volume: 1.5, type: 'webm/opus' });
+		
 		dispatcher.on('start', () => {
 		});
 
