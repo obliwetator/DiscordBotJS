@@ -71,5 +71,98 @@ message BotResponse {
 		}
 	}
 	BotPressenceMessage botPressenceMessage = 8;
-	
+
+	message BotChannelMessage {
+		enum ChannelType {
+			guild_text = 0;
+			dm = 1;
+			guild_voice = 2;
+			group_dm = 3;
+			guild_category = 4;
+			guild_news = 5;
+			guild_store = 6;
+			unkown = 7;
+		}
+		enum Action {
+			create = 0;
+			delete = 1;
+			edit = 2;
+		}
+		message EditPayload {
+			enum EditType {
+				channel = 0;
+			}
+
+			required EditType type = 0;
+		}
+
+		optional string name = 0;
+		required ChannelType type = 1;
+		required Action action = 2;
+		optional EditPayload editPaylaod = 3;
+	}
+	BotChannelMessage botChannelMessage = 9;
+
+	message BotEmoji {
+		enum EmojiAction {
+			create = 0;
+			delete = 1;
+			edit = 2;
+		}
+
+		message Payload {
+			string name = 0;
+			bool requires_colon = 1;
+			bool managed = 2;
+			bool animated = 3;
+			bool available = 4;
+			optional string user_id = 5;
+		}
+		EmojiAction action = 0;
+		Payload payload = 1;
+	}
+	BotEmoji botEmojiMessage = 10;
+
+	message BotGuild {
+		enum GuildAction {
+			guild_update = 0;
+			member_add = 1;
+			member_remove = 2;
+		}
+		message GuildUpdate {
+			string name = 0;
+		}
+
+		message MemberAdd {
+			string display_name = 0;
+			string username = 1;
+		}
+
+		message MemberRemove {
+			string executor = 0;
+		}
+
+		message MemberUpdate {
+			enum Action {
+				add_role = 0;
+				remove_role = 1;
+				update_name = 2;
+			}
+			message UpdateName {
+				string name = 0;
+			}
+			UpdateName update_name = 0;
+			Action action = 1;
+			optional string role = 2;
+			optional string executor = 3;
+
+		}
+
+		GuildUpdate guild_update = 0;
+		MemberAdd member_add = 1;
+		MemberRemove member_remove = 2;
+		MemberUpdate member_update = 3;
+	}
+
+	BotGuild botGuild = 11;
 }
