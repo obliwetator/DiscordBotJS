@@ -31,5 +31,9 @@ setInterval(() => {
 }, 25000);
 
 connect()
+// TODO: send wraped in json 
+function SendMessageToWebSocket(Encoded: Uint8Array, guild_id: string) {
+	WebSocket.send(Encoded)
+}
 
-export { WebSocket }
+export { WebSocket, SendMessageToWebSocket }
