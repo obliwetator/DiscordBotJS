@@ -1,12 +1,14 @@
 
-import { client, database } from "..";
-import { User, VoiceState } from "discord.js";
+import { GuildMember, User, VoiceConnection, VoiceState } from "discord.js";
 import DB from "../DB/DB";
 import { WebSocket } from "../WebSocketClient";
 import { DiscordBotJS } from "/home/ubuntu/DiscordBotJS/ProtoOutput/compiled";
 import fs from "fs";
 import FfmpegCommand from 'fluent-ffmpeg'
-import { exec } from "child_process";
+import { client, database } from '..';
+
+const BossMusicFilePath = "/home/ubuntu/DiscordBotJS/audioClips/"
+
 // voiceStateUpdate
 /* Emitted whenever a user changes voice state - e.g. joins/leaves a channel, mutes/unmutes.
 PARAMETER    TYPE             DESCRIPTION
@@ -38,6 +40,51 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
 		SendWSVoiceState(DiscordBotJS.BotResponse.BotVoiceMessage.VoiceState.channel_leave, newState)
 	}
 });
+
+client.on('guildMemberSpeaking', async (guildMember, b) => {
+	// Stopped speaking
+	// if (b.bitfield === 0) {
+	// 	console.log('b 0')
+	// } else {
+	// 	console.log('b 1')
+	// 	// Speaking
+	// 	if (client.voice) {
+	// 		console.log('v 1')
+	// 		if (client.voice.connections.has(guildMember.guild.id)) {
+	// 			console.log('v v 1')
+	// 			let connection = client.voice.connections.get(guildMember.guild.id)!
+	// 			console.log(b);
+	// 			let audioOutputFormat = 'ogg'
+	// 			console.log(client.voice?.connections);
+	// 			// Get the audio stream from discord for a certain user
+	// 			const audio = connection.receiver.createStream(guildMember as GuildMember, { mode: 'pcm', end: 'manual' })
+	// 			// Where the output will be stored
+	// 			var stream = fs.createWriteStream(`/home/ubuntu/DiscordBotJS/audioClips/UserClips/${guildMember!.id}.${audioOutputFormat}`, {flags: 'a'})
+		
+	// 			// If we need the raw pcm audio data (s16le)
+	// 			audio.pipe(fs.createWriteStream(`/home/ubuntu/DiscordBotJS/audioClips/UserClips/${guildMember!.id}`, {flags: 'a'}))
+		
+	// 			// Can use a file or in our case a stream
+	// 			let command = FfmpegCommand(audio);
+	// 			command.inputFormat('s16le')
+	// 			// the other functions set the output options and it wont work otherwise
+	// 			.inputOptions(['-ar 48000' , '-ac 2'])
+	// 			// When using streams we must specify an output format
+	// 			.outputFormat(audioOutputFormat)
+	// 			// .on('start', function(commandLine) {
+	// 			// 	console.log('Spawned Ffmpeg with command: ' + commandLine);
+	// 			// })
+	// 			// .on('end', function () {
+	// 			// 	console.log('file has been converted succesfully');
+	// 			// })
+	// 			// .on('error', function (err) {
+	// 			// 	console.log('an error happened: ' + err);
+	// 			// })
+	// 			.pipe(stream)
+	// 		}
+	// 	}
+	// }
+})
 
 /**
  * Decides what was the action in the users voice state\
@@ -96,7 +143,7 @@ async function HandleVoiceState(oldState: VoiceState, newState: VoiceState, data
 		} else if (!newState.serverMute && oldState.serverMute) {
 			const executor = await HandleVoiceStateExecutor(newState)
 			database.AddVoiceState(EnumVoiceState.server_unmute, newState.id!, newState.channelID!, executor)
-
+			
 			SendWSVoiceState(DiscordBotJS.BotResponse.BotVoiceMessage.VoiceState.server_unmute, newState, executor)
 
 		}
@@ -193,49 +240,110 @@ export enum EnumVoiceState {
 	channel_leave,
 }
 
-async function PlayBossMusic(newState: VoiceState) {
-	if (newState.member?.id === "146638124288704513") {
-		let audioOutputFormat = 'webm'
-		// join the channel the the user is in
-		const connection = await newState.member?.voice.channel?.join()!
-		// Get the audio stream from discord
-		const audio = connection.receiver.createStream(newState.member, { mode: 'pcm', end: 'manual' })
-		// Where the output will be stored
-		var stream = fs.createWriteStream(`/home/ubuntu/DiscordBotJS/audioClips/UserClips/${newState.member!.id}.${audioOutputFormat}`)
+const HasBossMusic: Map<string, string> = new Map();
 
-		// If we need the raw pcm audio data (s16le)
-		// audio.pipe(fs.createWriteStream(`/home/ubuntu/DiscordBotJS/audioClips/UserClips/${newState.member!.id}`))
+async function EstablishConnection(songName: string, newState: VoiceState, connection: VoiceConnection | null = null) {
+	if (client.voice) {
+		if (client.voice.connections.has(newState.guild.id)) {
+			// Connected in tha guild re use the connection
+			let connection = client.voice.connections.get(newState.guild.id)!
 
-		// Can use a file or in our case a stream
-		let command = FfmpegCommand(audio);
-		command.inputFormat('s16le')
-		// the other functions set the output options and it wont work otherwise
-		.inputOptions(['-ar 48000' , '-ac 2'])
-		// When using streams we must specify an output format
-		.outputFormat(audioOutputFormat)
-		// .on('start', function(commandLine) {
-		// 	console.log('Spawned Ffmpeg with command: ' + commandLine);
-		// })
-		// .on('end', function () {
-		// 	console.log('file has been converted succesfully');
-		// })
-		// .on('error', function (err) {
-		// 	console.log('an error happened: ' + err);
-		// })
-		.pipe(stream)
+			if (connection.channel.id !== newState.channelID) {
+				// different channel rejoin
+				connection = await newState.member?.voice.channel?.join()!
 
-		// Create a dispatcher
-		const dispatcher = connection.play(fs.createReadStream('/home/ubuntu/DiscordBotJS/audioClips/Dark Souls III Soundtrack OST - Vordt of the Boreal Valley-[AudioTrimmer.com].webm'), { volume: 1.5, type: 'webm/opus' });
-		
-		dispatcher.on('start', () => {
-		});
+				let stream = fs.createReadStream(BossMusicFilePath + songName);
+				stream.on('error', (err) => {
+					console.error('createReadStream error', err)
+					newState.member?.send("I am an idiot");
+					connection.disconnect()
+					return;
+				})
+				const dispatcher = connection.play(stream, { volume: 1.5, type: 'ogg/opus' });
+				dispatcher.on('start', () => {
+				});
+				dispatcher.on('finish', () => {
+					// Disconnect when finished playing
+					connection.disconnect()
+				});
+				// Always remember to handle errors appropriately!
+				dispatcher.on('error', console.error);
+			} else {
+				// same channel
+				let stream = fs.createReadStream(BossMusicFilePath + songName);
+				stream.on('error', (err) => {
+					console.error('createReadStream error', err);
+					newState.member?.send("I am an idiot");
+					connection.disconnect()
+					return;
+				})
+				const dispatcher = connection.play(stream, { volume: 1.5, type: 'ogg/opus' });
+				dispatcher.on('start', () => {
+				});
+				dispatcher.on('finish', () => {
+					// Disconnect when finished playing
+					connection.disconnect()
+				});
+				// Always remember to handle errors appropriately!
+				dispatcher.on('error', console.error);
+			}
 
-		dispatcher.on('finish', () => {
-			// Disconnect when finished playing
-			connection.disconnect()
-		});
+		} else {
+			// Not connected in that guild create new connection.
 
-		// Always remember to handle errors appropriately!
-		dispatcher.on('error', console.error);
+			// join the channel the user is in
+			const connection = await newState.member?.voice.channel?.join()!
+			// Create a dispatcher
+			let stream = fs.createReadStream(BossMusicFilePath + songName);
+			stream.on('error', (err) => {
+				console.error('createReadStream error', err)
+				newState.member?.send("I am an idiot");
+				connection.disconnect();
+				return;
+			})
+			const dispatcher = connection.play(stream, { volume: 1.5, type: 'ogg/opus' });
+			dispatcher.on('start', () => {
+			});
+			dispatcher.on('finish', () => {
+				// Disconnect when finished playing
+				connection.disconnect()
+			});
+			// Always remember to handle errors appropriately!
+			dispatcher.on('error', console.error);
+		}
+	} else {
+		// no voice no gain
 	}
+}
+
+async function PlayBossMusic(newState: VoiceState) {
+	if (HasBossMusic.has(newState.member?.id!)) {
+		// We have a match
+		const get = HasBossMusic.get(newState.member?.id!)!;
+		if (get.length > 0) {
+			// user has boss music
+			EstablishConnection(get, newState);
+		} else {
+			// no boss music for user return
+			return;
+		}
+	} else {
+		// no match go to db
+		const result = await database.GetUserBossMusic(newState.member!)
+		if (result.length > 0) {
+			// we have a result
+			HasBossMusic.set(newState.member?.id!, result[0].song_name);
+			EstablishConnection(result[0].song_name, newState);
+		} else {
+			// No boss music
+			HasBossMusic.set(newState.member?.id!, "");
+		}
+	}
+	// if (newState.member?.id === "183931044829986817") {
+	// 	EstablishConnection('/home/ubuntu/DiscordBotJS/audioClips/Dark_Souls_III_Soundtrack_OST_-_Vordt_of_the_Boreal_Valley.ogg', newState)
+	// } else if (newState.member?.id === "146638124288704513") {
+	// 	EstablishConnection('/home/ubuntu/DiscordBotJS/audioClips/LArabesque_Sindria.ogg', newState)
+	// } else if (newState.member?.id === "161172393719496704") {
+	// 	EstablishConnection('/home/ubuntu/DiscordBotJS/audioClips/MARCINISCOMMING.ogg', newState)
+	// }
 }
