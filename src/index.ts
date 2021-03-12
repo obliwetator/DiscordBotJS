@@ -20,7 +20,7 @@ obs;
 
 import chalk from "chalk";
 import { WebSocket } from "./WebSocketClient";
-import { DiscordBotJS } from "../ProtoOutput/compiled";
+import { DiscordBotJS } from "/home/ubuntu/DiscordBotJS/ProtoOutput/compiled";
 
 
 export const ctx = new chalk.Instance({ level: 3 });
@@ -426,7 +426,6 @@ client.on("presenceUpdate", (oldMember, newMember) => {
 		}
 	})
 	WebSocket.send(DiscordBotJS.BotResponse.encode(BotPressence).finish())
-    console.log(newMember.userID);
 });
 
 // userUpdate
