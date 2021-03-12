@@ -4,6 +4,12 @@ import { WebSocket } from "../WebSocketClient";
 import { IMessageTypeEnum, IBotMessage } from "../../src/Interfaces";
 import "../helper/stringify"
 import { DiscordBotJS } from "/home/ubuntu/DiscordBotJS/ProtoOutput/compiled";
+import https from "https";
+import fs from "fs";
+import FfmpegCommand from 'fluent-ffmpeg'
+import Ffmpeg from "fluent-ffmpeg";
+// TODO: Unifined path with voice.ts
+const BossMusicFilePath = "/home/ubuntu/DiscordBotJS/audioClips/"
 
 /** MAYBE: Add timeout to delete old entires to prevent a very large data set */
 const DMChanellsSet = new Set<string>();
@@ -17,7 +23,7 @@ client.on("messageDelete", async (message) => {
 	// Ignore DM deletions
 	if (!message.guild) {
 		database.DeleteMessage(message as PartialMessage);
-		console.log('Priv Message Deleted');
+
 		return;
 	}
 	const deletionLog = await GetFetchLogsSingle(message, 'MESSAGE_DELETE');
@@ -52,9 +58,6 @@ client.on("messageDelete", async (message) => {
 	})
 	const Encoded = DiscordBotJS.BotResponse.encode(BotMessage).finish();
 	WebSocket.send(Encoded)
-
-	console.log(`message is deleted -> ${message.id}`);
-
 	return
 });
 
@@ -90,9 +93,6 @@ client.on("messageDeleteBulk", async (messages) => {
 		database.DeleteMessages(messages as Collection<string, PartialMessage>);
 	}
 
-	messages.forEach((value, key) => {
-		console.log("key => ", key, value)
-	})
 	database.DeleteMessages(messages as Collection<string, PartialMessage>);
 });
 
@@ -179,6 +179,88 @@ client.on("messageUpdate", async (oldMessage, newMessage) => {
 
 });
 
+let BotPrefix = "!piss";
+
+async function download(url: string, dest: string, fileName: string, user_id: string, msg: Message) {
+	https.get(url, (res) => {
+		const fileStream = fs.createWriteStream(dest)
+		res.pipe(fileStream);
+		fileStream.on("finish", () => {
+			fileStream.close()
+			FfmpegCommand(dest).ffprobe((err, data) => {
+				if (err) {
+					msg.channel.send("Failed. Something went wrong")
+					return;
+				}
+				// Pretty confident it's an audio file
+				if (data.streams[0].codec_type = 'audio' ) {
+					if (data.format.duration! < 20.0) {
+						// Can use a file or in our case a stream
+						let command = FfmpegCommand(dest);
+						command.on('start' , (a) => {
+							console.log(a);
+						})
+						// the other functions set the output options and it wont work otherwise
+						.outputOptions(['-c:a libopus' , '-b:a 96k'])
+						.on('start', function(commandLine) {
+							console.log('Spawned Ffmpeg with command: ' + commandLine);
+						})
+						.on('end', function () {
+							// Done with the temporary file remove.
+							fs.unlink(dest, (err) => {
+								if (err) {
+									console.error(err);
+									return;
+								}
+							})
+
+							database.UpdateUserBossMusic(user_id, fileName)
+						})
+						.on('error', function (err) {
+							console.log('an error happened: ' + err);
+						})
+						.saveToFile(dest + '.ogg')
+					} else {
+						// > 20 sec
+						msg.channel.send("Clips must be shorter than 20 sec")
+					}
+				} else {
+					// Not an audio file(?)
+					msg.channel.send("Not an audio file")
+				}
+			})
+
+		})
+
+		fileStream.on('error', (err) => {
+			console.log('ERROR => ', err)
+		})
+	})
+}
+
+async function HandleMessageForBotCommands(msg: Message) {
+	if (msg.content.startsWith(BotPrefix)) {
+		// Bot command
+		const args = msg.content.slice(BotPrefix.length).trim().split(/ +/);
+		console.log(args);
+		const command = args.shift()!.toLowerCase();
+
+		if (command === "add") {
+			const name = msg.attachments.first()?.name!
+			const WhereIsLastDot = name.lastIndexOf('.');
+			const fileName = name.slice(0, WhereIsLastDot)
+			console.log(fileName);
+			// find last dot to get the extension name
+			const extension = name.slice(WhereIsLastDot)
+			download(msg.attachments.first()?.url!, BossMusicFilePath + fileName, fileName, msg.author.id, msg);
+		} else {
+			msg.channel.send(`Unkown command ${command}`);
+		}
+
+		console.log(command);
+	}
+}
+
 client.on("message", async (msg) => {
 	// Ignore own messages. This can cause infinte loops
 	if (msg.author.id === client.user?.id) {
@@ -211,6 +293,7 @@ client.on("message", async (msg) => {
 
 	if (msg.type === "DEFAULT") {
 		database.AddMessage(msg);
+		HandleMessageForBotCommands(msg);
 		// send the message to all clients
 
 		const BotMessage = DiscordBotJS.BotResponse.create({
