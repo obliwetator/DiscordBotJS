@@ -1,6 +1,8 @@
 import { CategoryChannel, DMChannel, GuildChannel, NewsChannel, StoreChannel, TextChannel, User, VoiceChannel } from "discord.js";
 import { client, database, GetFetchLogsSingle } from "..";
 import { LogTypes } from "../DB/DB";
+import { DiscordBotJS } from "/home/ubuntu/DiscordBotJS/ProtoOutput/compiled";
+import { SendMessageToWebSocket } from "../WebSocketClient";
 
 
 // This fires every time the bot receives a message for the first time from the user since it's been started
@@ -13,24 +15,38 @@ client.on("channelCreate", async (channel) => {
 		return;
 	}
 	const deletionLog = await GetFetchLogsSingle(channel, 'CHANNEL_CREATE');
+	let channelType: DiscordBotJS.BotResponse.BotChannelMessage.ChannelType = DiscordBotJS.BotResponse.BotChannelMessage.ChannelType.unkown
 
 	if (!deletionLog) {
-		database.AddChannel(channel)
+		database.AddChannel(channel, null, channelType)
 	} else {
 		const { executor, target } = deletionLog;
 
 		if ((target as GuildChannel).id === channel.id) {
 			// Log matches the created channel
 		}
-		database.AddChannel(channel, executor.id)
+		database.AddChannel(channel, executor.id, channelType)
 	}
+
+	const ChannelCreate = DiscordBotJS.BotResponse.create({
+		id: channel.id,
+		guild_id: (channel as TextChannel).guild.id,
+		botChannelMessage: {
+			name: (channel as TextChannel).name,
+			type: DiscordBotJS.BotResponse.BotChannelMessage.ChannelType.guild_text,
+			action: DiscordBotJS.BotResponse.BotChannelMessage.Action.create
+		}
+	})
+	const Encoded = DiscordBotJS.BotResponse.encode(ChannelCreate).finish()
+	SendMessageToWebSocket(Encoded, (channel as TextChannel).guild.id);
 });
 
 client.on("channelDelete", async (channel) => {
 	const deletionLog = await GetFetchLogsSingle(channel, 'CHANNEL_DELETE');
+	let channelType: DiscordBotJS.BotResponse.BotChannelMessage.ChannelType = DiscordBotJS.BotResponse.BotChannelMessage.ChannelType.unkown
 
 	if (!deletionLog) {
-		database.AddChannel(channel)
+		database.AddChannel(channel, null, channelType)
 	} else {
 		const { executor, target } = deletionLog;
 
@@ -42,6 +58,18 @@ client.on("channelDelete", async (channel) => {
 			database.RemoveChannel(channel, null);	
 		}
 	}
+
+	const ChannelCreate = DiscordBotJS.BotResponse.create({
+		id: channel.id,
+		guild_id: (channel as TextChannel).guild.id,
+		botChannelMessage: {
+			name: (channel as TextChannel).name,
+			type: channelType,
+			action: DiscordBotJS.BotResponse.BotChannelMessage.Action.delete
+		}
+	})
+	const Encoded = DiscordBotJS.BotResponse.encode(ChannelCreate).finish()
+	SendMessageToWebSocket(Encoded, (channel as TextChannel).guild.id);
 })
 
 // channelUpdate

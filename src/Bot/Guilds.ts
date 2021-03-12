@@ -1,6 +1,8 @@
 import { GuildMember, PartialGuildMember, User } from "discord.js";
 import { client, database, GetFetchLogsSingle } from "..";
 import { LogTypes } from "../DB/DB";
+import { DiscordBotJS } from "/home/ubuntu/DiscordBotJS/ProtoOutput/compiled";
+import { SendMessageToWebSocket } from "../WebSocketClient";
 
 
 /* Emitted whenever a guild member changes - i.e. new role, removed role, nickname.
@@ -24,8 +26,6 @@ client.on("guildMemberUpdate", async (oldMember, newMember) => {
 			HandleGuildMemberUpdate(oldMember, newMember)
 		}
 	}
-
-
 });
 
 function HandleGuildMemberUpdate(oldMember: GuildMember | PartialGuildMember, newMember: GuildMember | PartialGuildMember, executor: User | null = null) {
@@ -33,16 +33,43 @@ function HandleGuildMemberUpdate(oldMember: GuildMember | PartialGuildMember, ne
 		if (oldMember.nickname !== newMember.nickname) {
 			// Nickname was changed
 			database.ChangeNickname(newMember, executor?.id);
+			const Guild = DiscordBotJS.BotResponse.create({
+				id: newMember.id,
+				guild_id: newMember.guild.id,
+				botGuild: {
+					member_update: {
+						action: DiscordBotJS.BotResponse.BotGuild.MemberUpdate.Action.update_name,
+						update_name: {
+							name: newMember.nickname ? newMember.user.username : newMember.nickname
+						}
+					}
+				}
+			})
+			const Encoded = DiscordBotJS.BotResponse.encode(Guild).finish()
+			SendMessageToWebSocket(Encoded, newMember.guild.id)
 		}
 		else if (oldMember.roles.cache.size !== newMember.roles.cache.size) {
 			// Role was changed 
 			if (oldMember.roles.cache.size > newMember.roles.cache.size) {
 				// Role was removed
+
 				let RemovedRole: string;
 				for (const key of oldMember.roles.cache) {
-					if (!oldMember.roles.cache.has(key[0])) {
+					if (oldMember.roles.cache.has(key[0])) {
 						RemovedRole = key[0];
 						database.RemoveGuildMemberRole(newMember.id, RemovedRole, executor?.id)
+						const Guild = DiscordBotJS.BotResponse.create({
+							id: newMember.id,
+							guild_id: newMember.guild.id,
+							botGuild: {
+								member_update: {
+									action: DiscordBotJS.BotResponse.BotGuild.MemberUpdate.Action.remove_role,
+									role: RemovedRole
+								}
+							}
+						})
+						const Encoded = DiscordBotJS.BotResponse.encode(Guild).finish()
+						SendMessageToWebSocket(Encoded, newMember.guild.id)
 						break;
 					}
 				}
@@ -53,11 +80,22 @@ function HandleGuildMemberUpdate(oldMember: GuildMember | PartialGuildMember, ne
 					if (!oldMember.roles.cache.has(key[0])) {
 						AddedRole = key[0];
 						database.AddGuildMemberRole(newMember.id, AddedRole, executor?.id)
+						const Guild = DiscordBotJS.BotResponse.create({
+							id: newMember.id,
+							guild_id: newMember.guild.id,
+							botGuild: {
+								member_update: {
+									action: DiscordBotJS.BotResponse.BotGuild.MemberUpdate.Action.add_role,
+									role: AddedRole
+								}
+							}
+						})
+						const Encoded = DiscordBotJS.BotResponse.encode(Guild).finish()
+						SendMessageToWebSocket(Encoded, newMember.guild.id)
 						break;
 					}
 				}
 			}
-			console.log('Role changed')
 		}
 		else if (oldMember.user !== newMember.user) {
 			console.log('User changed')
@@ -107,7 +145,6 @@ client.on("guildDelete", (guild) => {
 PARAMETER     TYPE               DESCRIPTION
 member        GuildMember        The member that has joined a guild    */
 client.on("guildMemberAdd", async (member) => {
-	// TODO: executor
 	// TODO: Logs
 	if (member.user) {
 		// First add global user
@@ -119,6 +156,19 @@ client.on("guildMemberAdd", async (member) => {
 	else {
 		database.AddLog("Guild member did not have a user?????", LogTypes.guild)
 	}
+
+	const Guild = DiscordBotJS.BotResponse.create({
+		id: member.id,
+		guild_id: member.guild.id,
+		botGuild: {
+			member_add: {
+				display_name: member.displayName,
+				username: member.user.username
+			}
+		}
+	})
+	const Encoded = DiscordBotJS.BotResponse.encode(Guild).finish()
+	SendMessageToWebSocket(Encoded, member.guild.id)
 });
 
 // guildMemberRemove
@@ -144,6 +194,18 @@ client.on("guildMemberRemove", async (member) => {
 			database.RemoveGuildMembersFromGuild(a);
 		}
 	}
+
+	const Guild = DiscordBotJS.BotResponse.create({
+		id: member.id,
+		guild_id: member.guild.id,
+		botGuild: {
+			member_remove: {
+				executor: null
+			}
+		}
+	})
+	const Encoded = DiscordBotJS.BotResponse.encode(Guild).finish()
+	SendMessageToWebSocket(Encoded, member.guild.id)
 });
 
 
@@ -170,7 +232,7 @@ PARAMETER     TYPE                DESCRIPTION
 member        GuildMember         The member that started/stopped speaking
 speaking      boolean             Whether or not the member is speaking    */
 client.on("guildMemberSpeaking", (member, speaking) => {
-	console.log(`a guild member starts/stops speaking: ${member.id}`);
+	// console.log(`a guild member starts/stops speaking: ${member.id}`);
 });
 
 // guildUnavailable
@@ -194,6 +256,18 @@ client.on("guildUpdate", (oldGuild, newGuild) => {
 		// guild name was changed
 		database.UpdateGuildName(newGuild.id, newGuild.name);
 	}
+
+	const Guild = DiscordBotJS.BotResponse.create({
+		id: newGuild.id,
+		guild_id: newGuild.id,
+		botGuild: {
+			guild_update: {
+				name: newGuild.name
+			}
+		}
+	})
+	const Encoded = DiscordBotJS.BotResponse.encode(Guild).finish()
+	SendMessageToWebSocket(Encoded, newGuild.id)
 });
 
 
