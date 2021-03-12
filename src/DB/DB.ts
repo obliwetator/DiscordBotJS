@@ -20,6 +20,7 @@ import { obs } from "../../timer"
 import chalk from "chalk";
 import { ctx } from "..";
 import { EnumVoiceState } from "../Bot/Voice";
+import { DiscordBotJS } from "/home/ubuntu/DiscordBotJS/ProtoOutput/compiled";
 
 obs;
 
@@ -53,7 +54,9 @@ export const DEBUG_LOG_ENABLED = {
 	}
 }
 
-class DB {
+export class DB {
+
+
 	public async UpdateEmojiName(id: string, NewName: string, OldName: string, executor: string | null = null) {
 		const UpdateEmoji = `UPDATE emojis SET name = '${NewName}' WHERE emoji_id = '${id}';`
 		const UpdateEmojiLog = `INSERT INTO log__emojis (emoji_id, executor, og_name, type) VALUES ('${id}', ${executor ? executor : "NULL"}, '${OldName}', 'edit');`
@@ -394,10 +397,9 @@ class DB {
 		}
 
 		const RemoveRoles = `DELETE FROM guild_users_to_roles WHERE user_id = '${id}' AND role_id = '${RemovedRole}'`;
-
 		this.GetQuery(RemoveRoles);
 	}
-	/**
+	/**	
 	 * Add a single role for a single user
 	 */
 	public AddGuildMemberRole(id: string, AddedRole: string, executor: string | null = null): void {
@@ -613,13 +615,14 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 		await this.AddMessage(message);
 	}
 
-	public async AddChannel(channel: Channel, executor: string | null = null) {
+	public async AddChannel(channel: Channel, executor: string | null = null,  channel_type: DiscordBotJS.BotResponse.BotChannelMessage.ChannelType) {
 		let GuildToChannelQuery = "INSERT INTO guild_to_channel (guild_id, channel_id) VALUES";
 		let ChannelPermissionsQuery = "INSERT INTO channel_permissions (channel_id, role_id, type, allow_bitfield, deny_bitfield) VALUES"
 		let InsertChannelQuery = "";
 		let InsertLogChannels = `INSERT INTO log__channels (channel_id, channel_type, type, executor) VALUES`
 
 		if (channel instanceof TextChannel) {
+			channel_type = DiscordBotJS.BotResponse.BotChannelMessage.ChannelType.guild_text;
 			channel.permissionOverwrites.forEach((permission) => {
 				ChannelPermissionsQuery += `('${channel.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 			})
@@ -629,6 +632,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 			InsertLogChannels += `('${channel.id}', 'text', 'add', '${executor ? executor : "NULL"}')`;
 		}
 		else if (channel instanceof VoiceChannel) {
+			channel_type = DiscordBotJS.BotResponse.BotChannelMessage.ChannelType.guild_voice
 			channel.permissionOverwrites.forEach((permission) => {
 				ChannelPermissionsQuery += `('${channel.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 			})
@@ -638,6 +642,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 			InsertLogChannels += `('${channel.id}', 'vocie', 'add', '${executor ? executor : "NULL"}')`;
 		}
 		else if (channel instanceof CategoryChannel) {
+			channel_type = DiscordBotJS.BotResponse.BotChannelMessage.ChannelType.guild_category
 			channel.permissionOverwrites.forEach((permission) => {
 				ChannelPermissionsQuery += `('${channel.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 			})
@@ -647,9 +652,11 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 			InsertLogChannels += `('${channel.id}', 'category', 'add', '${executor ? executor : "NULL"}')`;
 		}
 		else if (channel instanceof DMChannel) {
+			channel_type = DiscordBotJS.BotResponse.BotChannelMessage.ChannelType.dm
 			return;
 		}
 		else if (channel instanceof StoreChannel) {
+			channel_type = DiscordBotJS.BotResponse.BotChannelMessage.ChannelType.guild_store
 			channel.permissionOverwrites.forEach((permission) => {
 				ChannelPermissionsQuery += `('${channel.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 			})
@@ -659,6 +666,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 			InsertLogChannels += `('${channel.id}', 'store', 'add', '${executor ? executor : "NULL"}')`;
 		}
 		else if (channel instanceof NewsChannel) {
+			channel_type = DiscordBotJS.BotResponse.BotChannelMessage.ChannelType.guild_news
 			channel.permissionOverwrites.forEach((permission) => {
 				ChannelPermissionsQuery += `('${channel.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 			})
@@ -667,6 +675,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 			InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, name, position) VALUES ('${channel.id}', ${channel.parent ? `'${channel.parent.id}'` : "NULL"}, 'news', '${channel.name}', '${channel.position}');`
 			InsertLogChannels += `('${channel.id}', 'news', 'add', '${executor ? executor : "NULL"}')`;
 		} else {
+			
 			// Either GroupDM channel or unkown
 			console.log(chalk.red(''))
 			this.AddLog(`Unimplemeneted type type of type ${channel.type}`, LogTypes.general_log);
@@ -985,8 +994,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 		// Add GuildMembers
 		let InsertGuildUser = "INSERT INTO guild_user (user_id, nickname, display_hex_color) VALUES";
 		member.forEach((element) => {
-			InsertGuildUser += `('${element.id}', '${element.nickname ? element.nickname : element.user.username}', '${element.displayHexColor}'),`;
-
+			InsertGuildUser += `('${element.id}', '${element.nickname ? this.pool.escape(element.nickname) : this.pool.escape(element.user.username)}', '${element.displayHexColor}'),`;
 		})
 
 		InsertGuildUser = `${InsertGuildUser.slice(0, -1)};`;
@@ -1210,6 +1218,24 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 		const a = await this.GetQuery<ChannelsInterface>(GetDMChannelQuery)
 
 		return a
+	}
+
+	public async GetUserBossMusic(guildMember: GuildMember) {
+		const getMemberBossMusic = `SELECT song_name FROM guild_user_boss_music WHERE user_id = ${guildMember.id}`;
+
+		const a = await this.GetQuery<{song_name: string}>(getMemberBossMusic);
+
+		return a;
+	}
+
+	public async AddUserBossMusic(user_id: string, fileName: string) {
+		const sql = `INSERT INTO guild_user_boss_music (user_id, song_name) VALUES ('${user_id}', '${fileName}')`;
+	}
+
+	public async UpdateUserBossMusic(user_id: string, fileName: string) {
+		const sql = `UPDATE guild_user_boss_music SET song_name = '${fileName}.ogg' WHERE user_id = '${user_id}';`;
+
+		await this.GetQuery(sql);
 	}
 }
 
