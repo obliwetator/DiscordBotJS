@@ -2,7 +2,6 @@ import { Collection, GuildEmoji, Message, MessageAttachment, PartialMessage, Use
 import { client, ctx, database, GetFetchLogsSingle } from "..";
 import { WebSocket } from "../WebSocketClient";
 import { IMessageTypeEnum, IBotMessage } from "../../src/Interfaces";
-import "../helper/stringify"
 import { DiscordBotJS } from "/home/ubuntu/DiscordBotJS/ProtoOutput/compiled";
 import https from "https";
 import fs from "fs";
