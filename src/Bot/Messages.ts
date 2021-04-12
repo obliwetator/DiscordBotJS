@@ -7,6 +7,7 @@ import https from "https";
 import fs from "fs";
 import FfmpegCommand from 'fluent-ffmpeg'
 import Ffmpeg from "fluent-ffmpeg";
+import { PlayBossMusic } from "./Voice";
 // TODO: Unifined path with voice.ts
 const BossMusicFilePath = "/home/ubuntu/DiscordBotJS/audioClips/"
 
@@ -252,7 +253,30 @@ async function HandleMessageForBotCommands(msg: Message) {
 			// find last dot to get the extension name
 			const extension = name.slice(WhereIsLastDot)
 			download(msg.attachments.first()?.url!, BossMusicFilePath + fileName, fileName, msg.author.id, msg);
-		} else {
+		} 
+		else if (command === "playboss") {
+			let command = args.shift()!
+			const matches = command.match(/^<@!?(\d+)>$/);
+
+			if (!matches) {
+				// Something went wrong
+				msg.reply("Something went wrong")
+				return;
+			} 
+			const id = matches[1];
+
+			const target = msg.guild?.members.cache.get(id)
+
+			if (!target) {
+				// Target not found. This should not happen
+				return;
+			}
+
+			const VoiceState = target.voice
+
+			PlayBossMusic(VoiceState)
+		}
+		else {
 			msg.channel.send(`Unkown command ${command}`);
 		}
 

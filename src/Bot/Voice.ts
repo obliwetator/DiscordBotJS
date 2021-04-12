@@ -315,7 +315,7 @@ async function EstablishConnection(songName: string, newState: VoiceState, conne
 	}
 }
 
-async function PlayBossMusic(newState: VoiceState) {
+export async function PlayBossMusic(newState: VoiceState) {
 	if (HasBossMusic.has(newState.member?.id!)) {
 		// We have a match
 		const get = HasBossMusic.get(newState.member?.id!)!;
@@ -338,11 +338,4 @@ async function PlayBossMusic(newState: VoiceState) {
 			HasBossMusic.set(newState.member?.id!, "");
 		}
 	}
-	// if (newState.member?.id === "183931044829986817") {
-	// 	EstablishConnection('/home/ubuntu/DiscordBotJS/audioClips/Dark_Souls_III_Soundtrack_OST_-_Vordt_of_the_Boreal_Valley.ogg', newState)
-	// } else if (newState.member?.id === "146638124288704513") {
-	// 	EstablishConnection('/home/ubuntu/DiscordBotJS/audioClips/LArabesque_Sindria.ogg', newState)
-	// } else if (newState.member?.id === "161172393719496704") {
-	// 	EstablishConnection('/home/ubuntu/DiscordBotJS/audioClips/MARCINISCOMMING.ogg', newState)
-	// }
 }
