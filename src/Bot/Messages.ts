@@ -7,7 +7,9 @@ import https from "https";
 import fs from "fs";
 import FfmpegCommand from 'fluent-ffmpeg'
 import Ffmpeg from "fluent-ffmpeg";
-import { PlayBossMusic } from "./Voice";
+import { HasBossMusic, PlayBossMusic } from "./Voice";
+import ydtl from "ytdl-core";
+import { format } from "mysql";
 // TODO: Unifined path with voice.ts
 const BossMusicFilePath = "/home/ubuntu/DiscordBotJS/audioClips/"
 
@@ -127,7 +129,7 @@ client.on("messageUpdate", async (oldMessage, newMessage) => {
 			if (DBMessage[0].content !== newMessage.content) {
 				// we have the message. Update it and add a log
 				database.UpdateMessage(DBMessage[0], newMessage as Message);
-				
+
 				const BotMessage = DiscordBotJS.BotResponse.create({
 					id: newMessage.id,
 					guild_id: newMessage.guild!.id,
@@ -193,33 +195,10 @@ async function download(url: string, dest: string, fileName: string, user_id: st
 					return;
 				}
 				// Pretty confident it's an audio file
-				if (data.streams[0].codec_type = 'audio' ) {
+				if (data.streams[0].codec_type = 'audio') {
 					if (data.format.duration! < 20.0) {
 						// Can use a file or in our case a stream
-						let command = FfmpegCommand(dest);
-						command.on('start' , (a) => {
-							console.log(a);
-						})
-						// the other functions set the output options and it wont work otherwise
-						.outputOptions(['-c:a libopus' , '-b:a 96k'])
-						.on('start', function(commandLine) {
-							console.log('Spawned Ffmpeg with command: ' + commandLine);
-						})
-						.on('end', function () {
-							// Done with the temporary file remove.
-							fs.unlink(dest, (err) => {
-								if (err) {
-									console.error(err);
-									return;
-								}
-							})
-
-							database.UpdateUserBossMusic(user_id, fileName)
-						})
-						.on('error', function (err) {
-							console.log('an error happened: ' + err);
-						})
-						.saveToFile(dest + '.ogg')
+						ConvertFFmpeg(dest, user_id, fileName);
 					} else {
 						// > 20 sec
 						msg.channel.send("Clips must be shorter than 20 sec")
@@ -238,7 +217,7 @@ async function download(url: string, dest: string, fileName: string, user_id: st
 	})
 }
 
-async function HandleMessageForBotCommands(msg: Message) {
+async function HandleMessageForBotCommands(msg: Message): Promise<void> {
 	if (msg.content.startsWith(BotPrefix)) {
 		// Bot command
 		const args = msg.content.slice(BotPrefix.length).trim().split(/ +/);
@@ -246,35 +225,16 @@ async function HandleMessageForBotCommands(msg: Message) {
 		const command = args.shift()!.toLowerCase();
 
 		if (command === "add") {
-			const name = msg.attachments.first()?.name!
-			const WhereIsLastDot = name.lastIndexOf('.');
-			const fileName = name.slice(0, WhereIsLastDot)
-			console.log(fileName);
-			// find last dot to get the extension name
-			const extension = name.slice(WhereIsLastDot)
-			download(msg.attachments.first()?.url!, BossMusicFilePath + fileName, fileName, msg.author.id, msg);
-		} 
-		else if (command === "playboss") {
-			let command = args.shift()!
-			const matches = command.match(/^<@!?(\d+)>$/);
-
-			if (!matches) {
-				// Something went wrong
-				msg.reply("Something went wrong")
-				return;
-			} 
-			const id = matches[1];
-
-			const target = msg.guild?.members.cache.get(id)
-
-			if (!target) {
-				// Target not found. This should not happen
-				return;
+			// Add via attachment
+			if (msg.attachments.size > 0) {
+				AddMusicViaAttachment(msg);
+			} else {
+				// add via text (Youtube link)
+				AddMusicViaYTLink(args, msg);
 			}
-
-			const VoiceState = target.voice
-
-			PlayBossMusic(VoiceState)
+		}
+		else if (command === "playboss") {
+			PlayBossMusicViaMsg(args, msg);
 		}
 		else {
 			msg.channel.send(`Unkown command ${command}`);
@@ -324,15 +284,17 @@ client.on("message", async (msg) => {
 			guild_id: msg.guild!.id,
 			botMessage: {
 				channel_id: msg.channel.id,
-				content: msg.content, 
+				content: msg.content,
 				author: msg.author.id,
 				username: msg.author.username,
 				nickname: msg.guild!.members.cache.get(msg.author.id)!.nickname,
-				attachments: msg.attachments.size > 0 ? {[msg.attachments.first()!.id] : {
-					id: msg.attachments.first()!.id,
-					name: msg.attachments.first()!.name,
-					url: msg.attachments.first()!.url
-				}} : null
+				attachments: msg.attachments.size > 0 ? {
+					[msg.attachments.first()!.id]: {
+						id: msg.attachments.first()!.id,
+						name: msg.attachments.first()!.name,
+						url: msg.attachments.first()!.url
+					}
+				} : null
 			}
 		})
 
@@ -386,14 +348,131 @@ client.on("typingStart", (channel, user) => {
 
 });
 
-function replacer(this: any, key: any, value: any) {
-	const originalObject = this[key];
-	if(originalObject instanceof Map) {
-	  return {
-			dataType: 'Collection',
-			value: Array.from(originalObject.entries()), // or with spread: value: [...originalObject]
-	  };
-	} else {
-	  return value;
+function PlayBossMusicViaMsg(args: string[], msg: Message) {
+	let command = args.shift();
+	if (!command) {
+		msg.reply("No id");
+		return;
 	}
-  }
+	const matches = command.match(/^<?@?!?(\d{18,20})>?$/);
+
+	if (!matches) {
+		// Something went wrong
+		msg.reply("wrong id");
+		return;
+	}
+	const id = matches[1];
+
+	const target = msg.guild?.members.cache.get(msg.member?.id!);
+
+	if (!target) {
+		// Target not found. This should not happen
+		msg.reply("Target not found");
+		return;
+	}
+
+	const VoiceState = target.voice;
+
+	PlayBossMusic(VoiceState, id, msg);
+}
+
+function AddMusicViaYTLink(args: string[], msg: Message) {
+	let command = args.shift();
+	if (!command) {
+		msg.reply("No url");
+		return
+	}
+	// [0] for the full url
+	const matches = command.match(/^(https?\:\/\/)?((www\.)?youtube\.com|youtu\.?be)\/.+$/);
+
+	if (!matches) {
+		msg.reply("Not a youtube url");
+		return
+	}
+
+	let time = args.shift()?.split(',')!;
+
+	if (!time) {
+		// No timestamps provided
+		msg.reply("Provide a timestamp eg. x:xx,x:xx (20 secs max) 1");
+		return
+	}
+
+	let start = convert(time[0]);
+	let finish = convert(time[1]);
+
+	if (finish - start > 20) {
+		// No timestamps provided
+		msg.reply("Max 20 seconds");
+	}
+
+	// Unique? id for temp audio file
+	const date = Date.now() * Math.floor(Math.random() * 100000);
+	ydtl(matches[0], { filter: 'audioonly', quality: 'highestaudio' }).pipe(fs.createWriteStream(BossMusicFilePath + date + '.mp4')).on('finish', () => {
+		// Process file with ffmpeg
+		ConvertFFmpeg(BossMusicFilePath + date + '.mp4', msg.member?.id!, date + '.mp4', start, finish);
+		HasBossMusic.set(msg.member?.id!, date + '.mp4' + '.ogg');
+		msg.reply("Ok piss");
+	});
+}
+
+function AddMusicViaAttachment(msg: Message) {
+	const name = msg.attachments.first()?.name!;
+	const WhereIsLastDot = name.lastIndexOf('.');
+	const fileName = name.slice(0, WhereIsLastDot);
+	console.log(fileName);
+	// find last dot to get the extension name
+	const extension = name.slice(WhereIsLastDot);
+	download(msg.attachments.first()?.url!, BossMusicFilePath + fileName, fileName, msg.author.id, msg);
+}
+
+function ConvertFFmpeg(dest: string, user_id: string, fileName: string, start: number = 0, end: number = 0) {
+	let command = FfmpegCommand(dest);
+	command.on('start', (a) => {
+		console.log(a);
+	})
+	.inputOptions([`-ss ${start}`, `-to ${end}`])
+	// the other functions set the output options and it wont work otherwise
+	.outputOptions(['-c:a libopus', '-b:a 96k'])
+	.on('start', function (commandLine) {
+		console.log('Spawned Ffmpeg with command: ' + commandLine);
+	})
+	.on('end', function () {
+		// Done with the temporary file remove.
+		fs.unlink(dest, (err) => {
+			if (err) {
+				console.error(err);
+				return;
+			}
+		});
+		database.UpdateUserBossMusic(user_id, fileName);
+	})
+	.on('error', function (err) {
+		console.log('an error happened: ' + err);
+	})
+	.saveToFile(dest + '.ogg');
+}
+
+function convert(input: string) {
+	// if length 0 index [0] is < 60 secs
+	// if length 1 index [0] is < 60 min and index [1] is < 60 secs
+	// if length 3 index [0] is < 60 hours, index [1] is < 60 min and index [2] is < 60 secs
+	var a = input.split(':'); // split it at the colons
+	let seconds = 0; 
+
+	if (a.length === 1) {
+		let b = parseInt(a[0])
+		seconds = b;
+	} else if (a.length === 2) {
+		let b = parseInt(a[0])
+		let bb = parseInt(a[1])
+		seconds = (b * 60) + bb
+	} else {
+		let b = parseInt(a[0])
+		let bb = parseInt(a[1])
+		let bbb = parseInt(a[2])
+		seconds = ((b * 60 * 60) + (bb * 60)) + bbb
+	}
+
+	return seconds
+}

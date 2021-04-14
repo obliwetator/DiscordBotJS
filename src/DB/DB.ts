@@ -1220,8 +1220,8 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 		return a
 	}
 
-	public async GetUserBossMusic(guildMember: GuildMember) {
-		const getMemberBossMusic = `SELECT song_name FROM guild_user_boss_music WHERE user_id = ${guildMember.id}`;
+	public async GetUserBossMusic(guildMemberId: string) {
+		const getMemberBossMusic = `SELECT song_name FROM guild_user_boss_music WHERE user_id = '${guildMemberId}'`;
 
 		const a = await this.GetQuery<{song_name: string}>(getMemberBossMusic);
 
