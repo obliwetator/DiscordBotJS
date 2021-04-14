@@ -1,4 +1,4 @@
-import { GuildMember, User, VoiceConnection, VoiceState } from "discord.js";
+import { GuildMember, Message, User, VoiceConnection, VoiceState } from "discord.js";
 import DB from "../DB/DB";
 import { WebSocket } from "../WebSocketClient";
 import { DiscordBotJS } from "/home/ubuntu/DiscordBotJS/ProtoOutput/compiled";
@@ -24,7 +24,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
 			// User Joins a voice channel FOR THE FIRST TIME
 			database.AddVoiceState(EnumVoiceState.channel_join, newState.id!, newState.channelID!)
 			// Plays when user joins a channel for the first time
-			PlayBossMusic(newState);
+			PlayBossMusic(newState, newState.member?.id!);
 			SendWSVoiceState(DiscordBotJS.BotResponse.BotVoiceMessage.VoiceState.channel_join, newState)
 
 			return;
@@ -92,7 +92,7 @@ client.on('guildMemberSpeaking', async (guildMember, b) => {
 async function HandleVoiceState(oldState: VoiceState, newState: VoiceState, database: DB) {
 	// User switches channels
 	if (oldState.channel?.id !== newState.channel?.id) {
-		PlayBossMusic(newState)
+		PlayBossMusic(newState, newState.member?.id!)
 		SendWSVoiceState(DiscordBotJS.BotResponse.BotVoiceMessage.VoiceState.channel_join, newState)
 
 		return
@@ -239,9 +239,10 @@ export enum EnumVoiceState {
 	channel_leave,
 }
 
-const HasBossMusic: Map<string, string> = new Map();
+// TODO: API to update/remove/add users
+export const HasBossMusic: Map<string, string | null> = new Map();
 
-async function EstablishConnection(songName: string, newState: VoiceState, connection: VoiceConnection | null = null) {
+async function EstablishConnection(songName: string, newState: VoiceState) {
 	if (client.voice) {
 		if (client.voice.connections.has(newState.guild.id)) {
 			// Connected in tha guild re use the connection
@@ -315,27 +316,48 @@ async function EstablishConnection(songName: string, newState: VoiceState, conne
 	}
 }
 
-export async function PlayBossMusic(newState: VoiceState) {
-	if (HasBossMusic.has(newState.member?.id!)) {
+/**
+ * 
+ * @param newState the voice state of the persion initializing the action (either through command or joing the chanmel)
+ * @param target The id of the user for the song played
+ * @param msgRef Used to reply to messages
+ * @returns 
+ */
+export async function PlayBossMusic(newState: VoiceState, target: string, msgRef: Message | null = null) {
+	if (HasBossMusic.has(target)) {
 		// We have a match
-		const get = HasBossMusic.get(newState.member?.id!)!;
-		if (get.length > 0) {
+		if (!HasBossMusic.get(target)) {
+			// null return
+			if (msgRef) {
+				msgRef.reply("This user does not have boss music")
+			}
+
+			return
+		}
+		const songName = HasBossMusic.get(target)!;
+		if (songName.length > 0) {
 			// user has boss music
-			EstablishConnection(get, newState);
+			EstablishConnection(songName, newState);
 		} else {
 			// no boss music for user return
+			if (msgRef) {
+				msgRef.reply("This user does not have boss music")
+			}
 			return;
 		}
 	} else {
 		// no match go to db
-		const result = await database.GetUserBossMusic(newState.member!)
+		const result = await database.GetUserBossMusic(target)
 		if (result.length > 0) {
 			// we have a result
-			HasBossMusic.set(newState.member?.id!, result[0].song_name);
+			HasBossMusic.set(target, result[0].song_name);
 			EstablishConnection(result[0].song_name, newState);
 		} else {
 			// No boss music
-			HasBossMusic.set(newState.member?.id!, "");
+			HasBossMusic.set(target, null);
+			if (msgRef) {
+				msgRef.reply("This user does not have boss music")
+			}
 		}
 	}
 }
