@@ -1,6 +1,6 @@
 import { GuildMember, Message, User, VoiceConnection, VoiceState } from "discord.js";
 import DB from "../DB/DB";
-import { WebSocket } from "../WebSocketClient";
+import { SendMessageToWebSocket, WebSocket } from "../WebSocketClient";
 import { DiscordBotJS } from "/home/ubuntu/DiscordBotJS/ProtoOutput/compiled";
 import fs from "fs";
 import FfmpegCommand from 'fluent-ffmpeg'
@@ -219,7 +219,7 @@ function SendWSVoiceState(state: DiscordBotJS.BotResponse.BotVoiceMessage.VoiceS
 		}
 	})
 	const Encoded = DiscordBotJS.BotResponse.encode(State).finish()
-	WebSocket.send(Encoded)
+	SendMessageToWebSocket(Encoded)
 }
 
 export enum EnumVoiceState {
