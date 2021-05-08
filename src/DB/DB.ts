@@ -13,14 +13,13 @@ import {
 	PartialMessage,
 	Role, DMChannel, StoreChannel, NewsChannel, Invite, PermissionOverwrites, GuildEmoji, PartialChannelData
 } from "discord.js";
-
 import { performance, PerformanceObserver } from 'perf_hooks';
-
 import { obs } from "../../timer"
 import chalk from "chalk";
 import { ctx } from "..";
 import { EnumVoiceState } from "../Bot/Voice";
 import { DiscordBotJS } from "/home/ubuntu/DiscordBotJS/ProtoOutput/compiled";
+import { Emoji } from "discord.js";
 
 obs;
 
@@ -55,14 +54,57 @@ export const DEBUG_LOG_ENABLED = {
 }
 
 export class DB {
+	public async AddEmojis(emojisToAdd: Array<GuildEmoji>) {
+		let InsertRoles = "INSERT INTO emojis (emoji_id, guild_id, name, user_id, require_colons, managed, animated, available) VALUES";
+
+		emojisToAdd.forEach((element) => {
+			InsertRoles += ` ('${element.id}', '${element.guild.id}',  '${element.name}', NULL, ${element.requiresColons ? 1 : 0}, ${element.managed ? 1 : 0}, ${element.animated ? 1 : 0}, ${element.available ? 1 : 0}),`;
+
+		})
+
+		InsertRoles = `${InsertRoles.slice(0, -1)};`;
+
+		this.GetQuery(InsertRoles);
+	}
+	public async RemoveEmojis(emojis: Set<string>) {
+		//let DeleteRolesToGuildMember = `DELETE FROM guild_users_to_roles WHERE role_id IN (`
+		//let DeleteRolesToGuild = `DELETE FROM roles_to_guild WHERE role_id IN (`;
+		let DeleteRole = `DELETE FROM emojis WHERE emoji_id IN (`;
+
+		emojis.forEach((element) => {
+			//DeleteRolesToGuildMember += element + ",";
+			//DeleteRolesToGuild += element + ",";
+			DeleteRole += element + ",";
+		});
+
+		//DeleteRolesToGuildMember = DeleteRolesToGuildMember.slice(0, -1) + ");";
+		//DeleteRolesToGuild = DeleteRolesToGuild.slice(0, -1) + ");";
+		DeleteRole = DeleteRole.slice(0, -1) + ");";
+
+		this.GetQuery(`${DeleteRole}`)
+	}
+	public async GetEmojis(): Promise<Set<string>> {
+		const EmojisSet = new Set<string>();
+
+		const Emojis = (await this.GetQuery(`
+		SELECT * FROM emojis WHERE guild_id = '${this.GuildId}'
+		`) as Array<EmojisInterface>);
+
+		Emojis.forEach((element) => {
+			EmojisSet.add(element.emoji_id)
+		})
+
+		return EmojisSet;
+	}
 
 
 	public async UpdateEmojiName(id: string, NewName: string, OldName: string, executor: string | null = null) {
-		const UpdateEmoji = `UPDATE emojis SET name = '${NewName}' WHERE emoji_id = '${id}';`
+		const UpdateEmoji = `UPDATE emojis SET name = '${NewName}' WHERE emoji_id = '${id}';\n`
 		const UpdateEmojiLog = `INSERT INTO log__emojis (emoji_id, executor, og_name, type) VALUES ('${id}', ${executor ? executor : "NULL"}, '${OldName}', 'edit');`
 
 		const a = UpdateEmoji + UpdateEmojiLog;
-		await this.GetQuery(UpdateEmoji + UpdateEmojiLog)
+		console.log(a)
+		await this.GetQuery(a)
 	}
 	public async RemoveEmoji(id: string, executor: string | null = null) {
 		const RemoveEmoji = `UPDATE emojis SET is_deleted = '1' WHERE emoji_id = '${id}';`
@@ -71,7 +113,7 @@ export class DB {
 		await this.GetQuery(RemoveEmoji + RemoveEmojiLog);
 	}
 	public async AddEmoji(emoji: GuildEmoji, userId: string | null = null) {
-		let AddEmoji = `INSERT INTO emojis (emoji_id, name, user_id, require_colons, managed, animated, available) VALUES ('${emoji.id}', '${emoji.name}', ${userId ? `'${userId}'` : "NULL"}, ${emoji.requiresColons ? 1 : 0}, ${emoji.managed ? 1 : 0}, ${emoji.animated ? 1 : 0}, ${emoji.available ? 1 : 0});`
+		let AddEmoji = `INSERT INTO emojis (emoji_id, guild_id, name, user_id, require_colons, managed, animated, available) VALUES ('${emoji.id}', '${emoji.guild.id}',  '${emoji.name}', ${userId ? `'${userId}'` : "NULL"}, ${emoji.requiresColons ? 1 : 0}, ${emoji.managed ? 1 : 0}, ${emoji.animated ? 1 : 0}, ${emoji.available ? 1 : 0});`
 		const AddEmojiLog = `INSERT INTO log__emojis (emoji_id, executor, og_name, type) VALUES ('${emoji.id}', ${userId ? userId : "NULL"}, NULL, 'add');`
 
 		await this.GetQuery(AddEmoji + AddEmojiLog);
@@ -1307,4 +1349,16 @@ export enum SeverityEnum {
 	warn,
 	error
 
+}
+
+interface EmojisInterface {
+	emoji_id: string,
+	guild_id: string,
+	name: string,
+	user_id?: string,
+	require_colons: boolean,
+	managed: boolean,
+	animated: boolean,
+	available: boolean,
+	is_deleted: boolean,
 }

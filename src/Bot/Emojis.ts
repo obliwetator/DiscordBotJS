@@ -58,13 +58,9 @@ PARAMETER    TYPE       DESCRIPTION
 oldEmoji     Emoji      The old emoji
 newEmoji     Emoji      The new emoji    */
 client.on("emojiUpdate", async (oldEmoji, newEmoji) => {
-	console.log('Emoji update')
 	// They only thing that can be changed in emojis is the name(?)
 	const executor = await EmojiLogs(newEmoji, 'EMOJI_UPDATE');
 	database.UpdateEmojiName(newEmoji.id, newEmoji.name, oldEmoji.name, executor);
-
-	console.log('new emoji', newEmoji.id)
-	console.log('new emoji', oldEmoji.id)
 
 	const Emoji = DiscordBotJS.BotResponse.create({
 		id: newEmoji.id,
