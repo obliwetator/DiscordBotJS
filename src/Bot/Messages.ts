@@ -427,7 +427,7 @@ function ConvertFFmpeg(dest: string, user_id: string, fileName: string, start: n
 	command.on('start', (a) => {
 		console.log(a);
 	})
-	.inputOptions([`-ss ${start}`, `-to ${end}`])
+	.inputOptions([`-ss ${start}`, `-t ${end}`])
 	// the other functions set the output options and it wont work otherwise
 	.outputOptions(['-c:a libopus', '-b:a 96k'])
 	.on('start', function (commandLine) {
