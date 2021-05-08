@@ -1,15 +1,12 @@
 import { Collection, GuildEmoji, Message, MessageAttachment, PartialMessage, User } from "discord.js";
 import { client, ctx, database, GetFetchLogsSingle } from "..";
-import { WebSocket } from "../WebSocketClient";
-import { IMessageTypeEnum, IBotMessage } from "../../src/Interfaces";
+import { WebSocket, SendMessageToWebSocket } from "../WebSocketClient";
 import { DiscordBotJS } from "/home/ubuntu/DiscordBotJS/ProtoOutput/compiled";
 import https from "https";
 import fs from "fs";
 import FfmpegCommand from 'fluent-ffmpeg'
-import Ffmpeg from "fluent-ffmpeg";
 import { HasBossMusic, PlayBossMusic } from "./Voice";
 import ydtl from "ytdl-core";
-import { format } from "mysql";
 // TODO: Unifined path with voice.ts
 const BossMusicFilePath = "/home/ubuntu/DiscordBotJS/audioClips/"
 
@@ -59,7 +56,7 @@ client.on("messageDelete", async (message) => {
 		}
 	})
 	const Encoded = DiscordBotJS.BotResponse.encode(BotMessage).finish();
-	WebSocket.send(Encoded)
+	SendMessageToWebSocket(Encoded)
 	return
 });
 
@@ -141,7 +138,7 @@ client.on("messageUpdate", async (oldMessage, newMessage) => {
 					}
 				})
 				const Encoded = DiscordBotJS.BotResponse.encode(BotMessage).finish();
-				WebSocket.send(Encoded)
+				SendMessageToWebSocket(Encoded)
 			} else if (DBMessage[0].is_pinned !== newMessage.pinned) {
 				// Message was pinned/unpinned
 				if (newMessage.pinned) {
@@ -168,7 +165,7 @@ client.on("messageUpdate", async (oldMessage, newMessage) => {
 				}
 			})
 			const Encoded = DiscordBotJS.BotResponse.encode(BotMessage).finish();
-			WebSocket.send(Encoded)
+			SendMessageToWebSocket(Encoded)
 		} else if (oldMessage.pinned !== newMessage.pinned) {
 			// Message was pinned/unpinned
 			if (newMessage.pinned) {
@@ -198,7 +195,7 @@ async function download(url: string, dest: string, fileName: string, user_id: st
 				if (data.streams[0].codec_type = 'audio') {
 					if (data.format.duration! < 20.0) {
 						// Can use a file or in our case a stream
-						ConvertFFmpeg(dest, user_id, fileName);
+						ConvertFFmpeg(dest, user_id, fileName, 0, 0, msg);
 					} else {
 						// > 20 sec
 						msg.channel.send("Clips must be shorter than 20 sec")
@@ -234,7 +231,7 @@ async function HandleMessageForBotCommands(msg: Message): Promise<void> {
 			}
 		}
 		else if (command === "playboss") {
-			PlayBossMusicViaMsg(args, msg);
+			// PlayBossMusicViaMsg(args, msg);
 		}
 		else {
 			msg.channel.send(`Unkown command ${command}`);
@@ -300,7 +297,7 @@ client.on("message", async (msg) => {
 
 		const Encoded = DiscordBotJS.BotResponse.encode(BotMessage).finish();
 
-		WebSocket.send(Encoded)
+		SendMessageToWebSocket(Encoded)
 		return;
 	} else if (msg.type === "PINS_ADD") {
 		database.UpdateChannelPins(msg);
@@ -387,15 +384,15 @@ function AddMusicViaYTLink(args: string[], msg: Message) {
 
 	if (!matches) {
 		msg.reply("Not a youtube url");
-		return
+		return;
 	}
 
 	let time = args.shift()?.split(',')!;
 
 	if (!time) {
 		// No timestamps provided
-		msg.reply("Provide a timestamp eg. x:xx,x:xx (20 secs max) 1");
-		return
+		msg.reply("Provide a timestamp eg. x:xx,x:xx (20 secs max)");
+		return;
 	}
 
 	let start = convert(time[0]);
@@ -404,15 +401,14 @@ function AddMusicViaYTLink(args: string[], msg: Message) {
 	if (finish - start > 20) {
 		// No timestamps provided
 		msg.reply("Max 20 seconds");
+		return;
 	}
-
-	// Unique? id for temp audio file
+	
+	// Unique? id for temp audio file 
 	const date = Date.now() * Math.floor(Math.random() * 100000);
-	ydtl(matches[0], { filter: 'audioonly', quality: 'highestaudio' }).pipe(fs.createWriteStream(BossMusicFilePath + date + '.mp4')).on('finish', () => {
+	ydtl(matches![0], { filter: 'audioonly', quality: 'highestaudio' }).pipe(fs.createWriteStream(BossMusicFilePath + date)).on('finish', () => {
 		// Process file with ffmpeg
-		ConvertFFmpeg(BossMusicFilePath + date + '.mp4', msg.member?.id!, date + '.mp4', start, finish);
-		HasBossMusic.set(msg.member?.id!, date + '.mp4' + '.ogg');
-		msg.reply("Ok piss");
+		ConvertFFmpeg(BossMusicFilePath + date, msg.member?.id!, date.toString(), start, finish, msg);
 	});
 }
 
@@ -426,7 +422,7 @@ function AddMusicViaAttachment(msg: Message) {
 	download(msg.attachments.first()?.url!, BossMusicFilePath + fileName, fileName, msg.author.id, msg);
 }
 
-function ConvertFFmpeg(dest: string, user_id: string, fileName: string, start: number = 0, end: number = 0) {
+function ConvertFFmpeg(dest: string, user_id: string, fileName: string, start: number = 0, end: number = 0, msg: Message) {
 	let command = FfmpegCommand(dest);
 	command.on('start', (a) => {
 		console.log(a);
@@ -446,6 +442,9 @@ function ConvertFFmpeg(dest: string, user_id: string, fileName: string, start: n
 			}
 		});
 		database.UpdateUserBossMusic(user_id, fileName);
+		HasBossMusic.set(msg.member?.id!, fileName + '.ogg');
+
+		msg.reply("Ok piss");
 	})
 	.on('error', function (err) {
 		console.log('an error happened: ' + err);
