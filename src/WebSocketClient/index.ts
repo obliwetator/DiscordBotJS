@@ -1,5 +1,5 @@
 import ws from "ws";
-import { ctx } from "..";
+import { ctx, client } from "..";
 
 let WebSocket: ws
 
@@ -8,13 +8,14 @@ function connect() {
 	WebSocket.onopen = () => {
 		console.log(ctx.green('Bot socket is ready'))
 	};
-	// Bot will not receive messages
-	// WebSocket.onmessage =((event) => {
-
-	// })
+	// Bot will receive messages from the webserver (for now to receive intercations data)
+	WebSocket.onmessage =((event) => {
+		console.log(event.data)
+		client;
+	})
 
 	WebSocket.onerror = (event) => {
-		// Prevents exceptions
+		// console.log(event)         
 	}
 
 	WebSocket.onclose = (event) => {
@@ -32,7 +33,7 @@ setInterval(() => {
 
 connect()
 // TODO: send wraped in json 
-function SendMessageToWebSocket(Encoded: Uint8Array, guild_id: string) {
+function SendMessageToWebSocket(Encoded: Uint8Array, guild_id: string = "") {
 	WebSocket.send(Encoded)
 }
 
