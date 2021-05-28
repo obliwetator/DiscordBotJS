@@ -12,6 +12,26 @@ const BossMusicFilePath = "/home/ubuntu/DiscordBotJS/audioClips/"
 
 /** MAYBE: Add timeout to delete old entires to prevent a very large data set */
 const DMChanellsSet = new Set<string>();
+let botCommands: {
+	[key: string]: {
+		name: string,
+		description: string
+	}
+} = {
+	add: {
+		name: "add",
+		description: "add a song 20 secs max"
+	},
+	playboss: {
+		name: "playboss",
+		description: "play someone else boss music @name at the end"
+	},
+	help: {
+		name: "help",
+		description: "list available commands"
+	}
+}
+
 
 // messageDelete
 /* Emitted whenever a message is deleted.
@@ -221,7 +241,7 @@ async function HandleMessageForBotCommands(msg: Message): Promise<void> {
 		console.log(args);
 		const command = args.shift()!.toLowerCase();
 
-		if (command === "add") {
+		if (command === botCommands.add.name) {
 			// Add via attachment
 			if (msg.attachments.size > 0) {
 				AddMusicViaAttachment(msg);
@@ -230,11 +250,17 @@ async function HandleMessageForBotCommands(msg: Message): Promise<void> {
 				AddMusicViaYTLink(args, msg);
 			}
 		}
-		else if (command === "playboss") {
-			// PlayBossMusicViaMsg(args, msg);
+		else if (command === botCommands.playboss.name) {
+			PlayBossMusicViaMsg(args, msg);
+		} else if (command === botCommands.help.name) {
+			let text = ""
+			for (const [_key, value] of Object.entries(botCommands)) {
+				text += `${value.name} - ${value.description} \n`;
+			  }
+			msg.reply(`The current available commands are \n ${text}`)
 		}
 		else {
-			msg.channel.send(`Unkown command ${command}`);
+			msg.channel.send(`Unkown command ${command}. Type ${BotPrefix} help for all the available commands`);
 		}
 
 		console.log(command);
