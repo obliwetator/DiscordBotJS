@@ -1,5 +1,5 @@
 import { token } from "./Config";
-import { Channel, Client, TextChannel, Role, VoiceChannel, CategoryChannel, NewsChannel, StoreChannel, GuildMember, GuildAuditLogsAction, GuildAuditLogs, GuildChannel, Presence } from "discord.js";
+import { Channel, Client, TextChannel, Role, VoiceChannel, CategoryChannel, NewsChannel, StoreChannel, GuildMember, GuildAuditLogsAction, GuildAuditLogs, GuildChannel, Presence, Emoji, GuildEmoji } from "discord.js";
 const client = new Client({ partials: ['MESSAGE'] });
 import DB, { ChannelRolePermissions, LogTypes } from "./DB/DB";
 const database: DB = new DB();
@@ -19,7 +19,7 @@ export { client, database };
 obs;
 
 import chalk from "chalk";
-import { WebSocket } from "./WebSocketClient";
+import { SendMessageToWebSocket, WebSocket } from "./WebSocketClient";
 import { DiscordBotJS } from "/home/ubuntu/DiscordBotJS/ProtoOutput/compiled";
 
 
@@ -352,6 +352,33 @@ async function handleRoles(): Promise<void> {
 	database.UpdateAllRoles(client.guilds.cache.first()?.members.cache!);
 }
 
+async function handleEmojis() {
+	const emojis = await database.GetEmojis(); 
+
+	const emojisToAdd: Array<GuildEmoji> = [];
+
+	client.guilds.cache.first()?.emojis.cache.forEach((element, key) => {
+		if (!emojis.has(key)) {
+			// We DON'T have that emoji in our db
+			emojisToAdd.push(element);
+		} else {
+
+		}
+
+		emojis.delete(key)
+	});
+
+	if (emojis.size > 0) { 
+		database.RemoveEmojis(emojis) 
+	}
+	// Add ALL the roles in the current guild.
+	if (emojisToAdd.length > 0) {
+		await database.AddEmojis(emojisToAdd);
+	}
+	database.UpdateAllRoles(client.guilds.cache.first()?.members.cache!);
+		
+}
+
 client.on("ready", async () => {
 
 	const me = client.guilds.cache.get('362257054829641758')
@@ -368,6 +395,7 @@ client.on("ready", async () => {
 	// Remove, Add, Update
 	await handleChannelRoles();
 	// await database.dummy(client.channels.cache.first()!);
+	await handleEmojis();
 	performance.mark("b");
 	performance.measure("Init Operations done", "a", "b");
 
@@ -425,7 +453,7 @@ client.on("presenceUpdate", (oldMember, newMember) => {
 			status: newMember.status
 		}
 	})
-	WebSocket.send(DiscordBotJS.BotResponse.encode(BotPressence).finish())
+	SendMessageToWebSocket(DiscordBotJS.BotResponse.encode(BotPressence).finish())
 });
 
 // userUpdate
@@ -447,8 +475,6 @@ info         string     The warning   */
 client.on("warn", (info) => {
 	console.log(`warn: ${info}`);
 });
-
-
 
 client.on("rateLimit", (a) => {
 	console.log('RATE LIMIT', a);
