@@ -20,8 +20,8 @@ message BotResponse {
 		string author = 3;
 		string nickname = 4;
 		string username = 5;
-		map<string, BotMessageAttachment> attachments = 8 [default = null];
-		repeated MessageEmbed embeds = 9 [packed=true];
+		map<string, BotMessageAttachment> attachments = 8;
+		repeated MessageEmbed embeds = 9;
 	}
 	BotMessage botMessage = 4;
 
@@ -64,7 +64,7 @@ message BotResponse {
 	BotVoiceMessage botVoiceMessage = 7;
 
 	message BotPressenceMessage {
-		string status = 0;
+		string status = 1;
 		
 		message Activity {
 
@@ -93,13 +93,13 @@ message BotResponse {
 				channel = 0;
 			}
 
-			required EditType type = 0;
+			EditType type = 1;
 		}
 
-		optional string name = 0;
-		required ChannelType type = 1;
-		required Action action = 2;
-		optional EditPayload editPaylaod = 3;
+		optional string name = 1;
+		ChannelType type = 2;
+		Action action = 3;
+		optional EditPayload editPaylaod = 4;
 	}
 	BotChannelMessage botChannelMessage = 9;
 
@@ -111,35 +111,30 @@ message BotResponse {
 		}
 
 		message Payload {
-			string name = 0;
-			bool requires_colon = 1;
-			bool managed = 2;
-			bool animated = 3;
-			bool available = 4;
-			optional string user_id = 5;
+			string name = 1;
+			bool requires_colon = 2;
+			bool managed = 3;
+			bool animated = 4;
+			bool available = 5;
+			optional string user_id = 6;
 		}
-		EmojiAction action = 0;
-		Payload payload = 1;
+		EmojiAction action = 1;
+		Payload payload = 2;
 	}
 	BotEmoji botEmojiMessage = 10;
 
 	message BotGuild {
-		enum GuildAction {
-			guild_update = 0;
-			member_add = 1;
-			member_remove = 2;
-		}
 		message GuildUpdate {
-			string name = 0;
+			string name = 1;
 		}
 
 		message MemberAdd {
-			string display_name = 0;
-			string username = 1;
+			string display_name = 1;
+			string username = 2;
 		}
 
 		message MemberRemove {
-			string executor = 0;
+			string executor = 1;
 		}
 
 		message MemberUpdate {
@@ -149,19 +144,19 @@ message BotResponse {
 				update_name = 2;
 			}
 			message UpdateName {
-				string name = 0;
+				string name = 1;
 			}
-			UpdateName update_name = 0;
-			Action action = 1;
-			optional string role = 2;
-			optional string executor = 3;
+			UpdateName updatename = 1;
+			Action action = 2;
+			optional string role = 3;
+			optional string executor = 4;
 
 		}
 
-		GuildUpdate guild_update = 0;
-		MemberAdd member_add = 1;
-		MemberRemove member_remove = 2;
-		MemberUpdate member_update = 3;
+		GuildUpdate guild_update = 1;
+		MemberAdd member_add = 2;
+		MemberRemove member_remove = 3;
+		MemberUpdate member_update = 4;
 	}
 
 	BotGuild botGuild = 11;
