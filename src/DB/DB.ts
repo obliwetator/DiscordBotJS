@@ -409,7 +409,7 @@ export class DB {
 	// deleted: false
 	public async AddInvite(invite: Invite) {
 
-		const sql = `INSERT INTO channel_invites (invite_id, channel_id, created_at, inviter_id, max_age, max_uses, uses, temporary) VALUES	('${invite.code}', '${invite.channel.id}', '${invite.createdTimestamp}', '${invite.inviter?.id}', '${invite.maxAge}', '${invite.maxUses}', '${invite.uses}', '${invite.temporary}')`
+		const sql = `INSERT INTO channel_invites (invite_id, channel_id, created_at, inviter_id, max_age, max_uses, uses, temporary) VALUES	('${invite.code}', '${invite.channel.id}', '${invite.createdTimestamp}', '${invite.inviter?.id}', '${invite.maxAge}', '${invite.maxUses}', '${invite.uses}', '${invite.temporary ? 1 : 0}')`
 
 
 		await this.GetQuery(sql)
@@ -419,7 +419,7 @@ export class DB {
 	*/
 	public async RemoveInvite(invite: Invite) {
 
-		const sql = `UPDATE channel_invites SET deleted=true WHERE invite_id = ${invite.code};`
+		const sql = `UPDATE channel_invites SET deleted=true WHERE invite_id = '${invite.code}';`
 
 		await this.GetQuery(sql)
 	}
