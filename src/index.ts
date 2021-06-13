@@ -16,7 +16,7 @@ import './Bot/Roles'
 import './Bot/Voice'
 
 export { client, database };
-obs;
+obs; 
 
 import chalk from "chalk";
 import { SendMessageToWebSocket, WebSocket } from "./WebSocketClient";
