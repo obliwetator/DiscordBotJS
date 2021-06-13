@@ -43,17 +43,14 @@ const DEBUG_ENABLED = false;
 
 // TODO: get all guild keys not just the first
 async function handleGuild(): Promise<void> {
-	const GuildKey = client.guilds.cache.firstKey();
-	database.GuildId = GuildKey!;
-	if (await database.FirstTimeInGuild(GuildKey!)) {
-		database.AddGuild(client.guilds.cache.first()!);
-		console.log(`First time in ${client.guilds.cache.first()?.name}`)
-	}
+	const guilds = client.guilds.cache
+	database.Guilds = client.guilds.cache
+	await database.FirstTimeInGuild(guilds);
 }
 
 async function handleChannels(): Promise<void> {
 	// Check if the chanels match up since last login
-	const channels = await database.GetChannels(database.GuildId!);
+	const channels = await database.GetChannels();
 	const ChannelsToAdd: Array<Channel> = [];
 	client.channels.cache.forEach((element, key) => {
 		if (!channels.has(key)) {
@@ -247,7 +244,7 @@ function HandleUpdatingPermissions<T extends GuildChannel | TextChannel | VoiceC
 
 async function handleChannelRoles(): Promise<void> {
 	const ChannelPermissions = await database.GetChannelPermissions();
-
+	// 			  channel id
 	let a = new Map<string, ChannelRolePermissions[]>();
 	const PermissionsToAdd = new Map<string, ChannelRolePermissions[]>();
 	const PermissionsToUpdate = new Map<string, ChannelRolePermissions[]>();
@@ -260,26 +257,28 @@ async function handleChannelRoles(): Promise<void> {
 			a.get(element.channel_id)?.push(element)
 		}
 	})
-	// TODO remove harcoded value and iterrate over ALL guilds
-	client.guilds.cache.get("362257054829641758")!.channels.cache.forEach((element) => {
-		let RoleArr = a.get(element.id)!
-		if (RoleArr === undefined) {
-			// Some channels MAY NOT have permission overrides
-			// We don't have associated that channel with ANY roles
-			// If the channel doesn't have permission overrides we assume its (0,0) for @everyone
-			HandleAddingPermissions(element, PermissionsToAdd);
-		} else {
-			// We have a channel with AT LEAST 1 role
-			HandleUpdatingPermissions(element, RoleArr, PermissionsToAdd, PermissionsToUpdate);
 
-			// Go through all elements and check what's left
-			// The remaining elements need to be deleted from the DB
-			RoleArr.forEach((element, key) => {
-				if (element) {
-					PermissionsToRemove.push({ channel_id: element.channel_id, role_id: element.role_id, deny: element.deny_bitfield, allow: element.allow_bitfield });
+	client.guilds.cache.forEach((guilds, keyGuild) => {
+		guilds.channels.cache.forEach((channels, keyChannel) => {
+				let RoleArr = a.get(channels.id)!
+				if (RoleArr === undefined) {
+					// Some channels MAY NOT have permission overrides
+					// We don't have associated that channel with ANY roles
+					// If the channel doesn't have permission overrides we assume its (0,0) for @everyone
+					HandleAddingPermissions(channels, PermissionsToAdd);
+				} else {
+					// We have a channel with AT LEAST 1 role
+					HandleUpdatingPermissions(channels, RoleArr, PermissionsToAdd, PermissionsToUpdate);
+				
+					// Go through all elements and check what's left
+					// The remaining elements need to be deleted from the DB
+					RoleArr.forEach((element, key) => {
+						if (element) {
+							PermissionsToRemove.push({ channel_id: element.channel_id, role_id: element.role_id, deny: element.deny_bitfield, allow: element.allow_bitfield });
+						}
+					})
 				}
-			})
-		}
+		})
 	})
 
 	if (PermissionsToRemove.length > 0) {
@@ -296,25 +295,35 @@ async function handleChannelRoles(): Promise<void> {
 
 async function handleUsers(): Promise<void> {
 	const GuildMembers = await database.GetGuildUsers();
-	const UsersToAdd: Array<GuildMember> = [];
-	client.guilds.cache.first()?.members.cache.forEach((element, key) => {
-		if (!GuildMembers.has(key)) {
-			// We don't have that user. Add it
-			UsersToAdd.push(element);
+	const UsersToAdd: GuildMember[] = [];
+	client.guilds.cache.forEach((guild, keyGuild) => {
+		guild.members.cache.forEach((member, keyMember) => {
+			if (!GuildMembers.get(keyGuild)?.has(keyMember)) {
+				// We don't have that user. Add it
+				UsersToAdd.push(member);
+			}
+			GuildMembers.get(keyGuild)?.delete(keyMember)
+		})
+	})
+
+	// loop over and check if the sets are empty
+	GuildMembers.forEach((element, key) => {
+		if (element.size === 0) {
+			GuildMembers.delete(key)
 		}
-		GuildMembers.delete(key)
 	});
+
 
 	if (UsersToAdd.length > 0) {
 		await database.AddUsers(UsersToAdd);
-		database.AddGuildMembers(UsersToAdd);
+		// await database.AddGuildMembers(UsersToAdd);
 	}
 	// Remove any user that we itterate over.
 	// Any User that's left is NOT present in the guild and has to be removed from the DB.
 	if (GuildMembers.size > 0) {
-		database.RemoveGuildMembersFromGuild(GuildMembers)
+		await database.RemoveGuildMembersFromGuild(GuildMembers)
 	}
-
+ 
 	// if (client.users.cache.size > 0) {
 
 	// }
@@ -357,16 +366,19 @@ async function handleEmojis() {
 
 	const emojisToAdd: Array<GuildEmoji> = [];
 
-	client.guilds.cache.first()?.emojis.cache.forEach((element, key) => {
-		if (!emojis.has(key)) {
-			// We DON'T have that emoji in our db
-			emojisToAdd.push(element);
-		} else {
+	client.guilds.cache.forEach((guild, keyGuild) => {
+		guild.emojis.cache.forEach((emoji, keyEmoji) => {
+			if (!emojis.get(keyGuild)?.has(keyEmoji)) {
+				// We DON'T have that emoji in our db
+				emojisToAdd.push(emoji);
+			} else {
+	
+			}
+	
+			emojis.get(keyGuild)?.delete(keyEmoji)
+		})
+	})
 
-		}
-
-		emojis.delete(key)
-	});
 
 	if (emojis.size > 0) { 
 		database.RemoveEmojis(emojis) 
@@ -383,7 +395,6 @@ client.on("ready", async () => {
 
 	const me = client.guilds.cache.get('362257054829641758')
 	performance.mark("a");
-	client.guilds.cache.first()?.channels
 	// register guild
 	await handleGuild();
 	// Check all users. Remove, Add, Update

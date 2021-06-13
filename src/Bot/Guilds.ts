@@ -129,6 +129,7 @@ client.on("guildCreate", (guild) => {
 	// TODO: executor
 	// TODO: Logs
 	// INIT OPERATION HERE
+	database.AddGuild(guild);
 	console.log(`the client joins a guild`);
 });
 
@@ -148,9 +149,9 @@ client.on("guildMemberAdd", async (member) => {
 	// TODO: Logs
 	if (member.user) {
 		// First add global user
-		await database.AddUsers([member] as Array<GuildMember>);
+		await database.AddUser(member);
 		// Then add guild user
-		database.AddGuildMembers([member] as Array<GuildMember>);
+		database.AddGuildMember(member);
 		database.AddLog(`a user joins a guild: ${member.id}`, LogTypes.guild_member)
 	}
 	else {
@@ -180,18 +181,17 @@ client.on("guildMemberRemove", async (member) => {
 	// TODO: Create dedicated function to delete only 1 user?
 	// TODO: ADD LOGS
 	const deletionLog = await GetFetchLogsSingle(member, 'MEMBER_KICK');
-	const a = new Set(member.id);
 
 	if (!deletionLog) {
-		database.RemoveGuildMembersFromGuild(a);
+		await database.RemoveGuildMemberFromGuild(member);
 	} else {
 		const { executor, target } = deletionLog;
 
 		if ((target as GuildMember).id === member.id) {
 			// Log matches the created channel
-			database.RemoveGuildMembersFromGuild(a, executor.id);
+			await database.RemoveGuildMemberFromGuild(member, executor.id);
 		} else {
-			database.RemoveGuildMembersFromGuild(a);
+			await database.RemoveGuildMemberFromGuild(member);
 		}
 	}
 

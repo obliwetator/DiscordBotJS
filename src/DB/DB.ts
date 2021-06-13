@@ -11,12 +11,12 @@ import {
 	VoiceChannel,
 	GuildMember,
 	PartialMessage,
-	Role, DMChannel, StoreChannel, NewsChannel, Invite, PermissionOverwrites, GuildEmoji, PartialChannelData
+	Role, DMChannel, StoreChannel, NewsChannel, Invite, PermissionOverwrites, GuildEmoji, PartialChannelData, PartialGuildMember
 } from "discord.js";
 import { performance, PerformanceObserver } from 'perf_hooks';
 import { obs } from "../../timer"
 import chalk from "chalk";
-import { ctx } from "..";
+import { client, ctx } from "..";
 import { EnumVoiceState } from "../Bot/Voice";
 import { DiscordBotJS } from "/home/ubuntu/DiscordBotJS/ProtoOutput/compiled";
 import { Emoji } from "discord.js";
@@ -66,15 +66,15 @@ export class DB {
 
 		this.GetQuery(InsertRoles);
 	}
-	public async RemoveEmojis(emojis: Set<string>) {
+	public async RemoveEmojis(emojis: Map<string, Set<string>>) {
 		//let DeleteRolesToGuildMember = `DELETE FROM guild_users_to_roles WHERE role_id IN (`
 		//let DeleteRolesToGuild = `DELETE FROM roles_to_guild WHERE role_id IN (`;
 		let DeleteRole = `DELETE FROM emojis WHERE emoji_id IN (`;
 
-		emojis.forEach((element) => {
+		emojis.forEach((element, key) => {
 			//DeleteRolesToGuildMember += element + ",";
 			//DeleteRolesToGuild += element + ",";
-			DeleteRole += element + ",";
+			DeleteRole += key + ",";
 		});
 
 		//DeleteRolesToGuildMember = DeleteRolesToGuildMember.slice(0, -1) + ");";
@@ -83,18 +83,32 @@ export class DB {
 
 		this.GetQuery(`${DeleteRole}`)
 	}
-	public async GetEmojis(): Promise<Set<string>> {
-		const EmojisSet = new Set<string>();
+	/**
+	 * 
+	 * @returns Map string is guild, set is the emojis ids
+	 */
+	public async GetEmojis(): Promise<Map<string,Set<string>>> {
+		const EmojisMap = new Map<string,Set<string>>();
+		let sql = "SELECT * FROM emojis WHERE guild_id IN ("
+		this.Guilds.forEach((element, key) => {
+			sql += `'${key}',`
+		});
 
-		const Emojis = (await this.GetQuery(`
-		SELECT * FROM emojis WHERE guild_id = '${this.GuildId}'
-		`) as Array<EmojisInterface>);
+		sql = sql.slice(0, -1) + ") ORDER BY guild_id DESC";
 
-		Emojis.forEach((element) => {
-			EmojisSet.add(element.emoji_id)
-		})
+		const Emojis = (await this.GetQuery(sql) as Array<EmojisInterface>);
 
-		return EmojisSet;
+		for (let i = 0, n = Emojis.length; i < n; i++) {
+			// if (Emojis[i].guild_id === this.Guilds.get(Emojis[i].guild_id)?.id) {
+				if (EmojisMap.has(Emojis[i].guild_id)) {
+					EmojisMap.get(Emojis[i].guild_id)?.add(Emojis[i].emoji_id)
+				} else {
+					EmojisMap.set(Emojis[i].guild_id, new Set([Emojis[i].emoji_id]))
+				}
+			// }				
+		}
+
+		return EmojisMap;
 	}
 
 
@@ -243,24 +257,14 @@ export class DB {
 		await this.GetQuery(query + LogQuery);
 	}
 	public async GetChannelPermissions() {
-		// Very inneficient query
-		// const a = await this.prisma.channel_permissions.findMany({
-		// 	include:{
-		// 		channels:{
-		// 			include:{
-		// 				guild_to_channel:{
-		// 					where:{
-		// 						guild_id: this.GuildId
-		// 					}
-		// 				}
-		// 			}
-		// 		}
-		// 	}
-		// })
+		let sql = "SELECT channel_permissions.* FROM channel_permissions LEFT JOIN channels ON channel_permissions.channel_id = channels.channel_id LEFT JOIN guild_to_channel ON guild_to_channel.channel_id = channels.channel_id WHERE guild_to_channel.guild_id IN ("
+		this.Guilds.forEach((element, key) => {
+			sql += `'${key}',`;
+		})
 
-		const a = await this.GetQuery(`SELECT channel_permissions.* FROM channel_permissions LEFT JOIN channels ON channel_permissions.channel_id = channels.channel_id LEFT JOIN guild_to_channel ON guild_to_channel.channel_id = channels.channel_id WHERE guild_to_channel.guild_id = '${this.GuildId}'`) as ChannelRolePermissions[]
+		sql = sql.slice(0, -1) + ");";
 
-		return a;
+		return await this.GetQuery<ChannelRolePermissions>(sql)
 	}
 	public async AddDMChannel(channel: DMChannel) {
 		const sql = `INSERT INTO channels (channel_id, types, recepient) VALUES ('${channel.id}', 'dm', '${channel.recipient.id}') `
@@ -455,7 +459,7 @@ export class DB {
 	}
 	public pool: Pool;
 	// This wont work with more than 1 guild
-	GuildId: string;
+	Guilds: Collection<string, Guild> = new Collection<string, Guild>();
 	constructor() {
 		this.pool = createPool({
 			connectionLimit: 100,
@@ -467,7 +471,6 @@ export class DB {
 			charset: "utf8mb4_general_ci",
 			debug: false,
 		});
-		this.GuildId = "";
 	}
 
 	// private SetQuery<T>(query: string, values: T) {
@@ -669,7 +672,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 				ChannelPermissionsQuery += `('${channel.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 			})
 
-			GuildToChannelQuery += `('${this.GuildId}', '${channel.id}')`;
+			GuildToChannelQuery += `('${channel.guild.id}', '${channel.id}')`;
 			InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, name, position, topic, nsfw, rate_limit_per_user) VALUES ('${channel.id}', ${channel.parent ? `'${channel.parent.id}'` : "NULL"}, 'text', '${channel.name}', '${channel.position}', '${channel.topic}', '${channel.nsfw ? 1 : 0}', '${channel.rateLimitPerUser}');`
 			InsertLogChannels += `('${channel.id}', 'text', 'add', '${executor ? executor : "NULL"}')`;
 		}
@@ -679,7 +682,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 				ChannelPermissionsQuery += `('${channel.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 			})
 
-			GuildToChannelQuery += `('${this.GuildId}', '${channel.id}')`;
+			GuildToChannelQuery += `('${channel.guild.id}', '${channel.id}')`;
 			InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, name, bitrate, user_limit, position) VALUES ('${channel.id}', ${channel.parent ? `'${channel.parent.id}'` : "NULL"}, 'voice', '${channel.name}', '${channel.bitrate}', '${channel.userLimit}', '${channel.position}');`
 			InsertLogChannels += `('${channel.id}', 'vocie', 'add', '${executor ? executor : "NULL"}')`;
 		}
@@ -689,7 +692,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 				ChannelPermissionsQuery += `('${channel.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 			})
 
-			GuildToChannelQuery += `('${this.GuildId}', '${channel.id}'),`;
+			GuildToChannelQuery += `('${channel.guild.id}', '${channel.id}'),`;
 			InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, position, name) VALUES ('${channel.id}', ${channel.parent ? `'${channel.parent.id}'` : "NULL"}, 'category', '${channel.position}', '${channel.name}');`
 			InsertLogChannels += `('${channel.id}', 'category', 'add', '${executor ? executor : "NULL"}')`;
 		}
@@ -703,7 +706,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 				ChannelPermissionsQuery += `('${channel.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 			})
 
-			GuildToChannelQuery += `('${this.GuildId}', '${channel.id}')`;
+			GuildToChannelQuery += `('${channel.guild.id}', '${channel.id}')`;
 			InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, name, position) VALUES ('${channel.id}', ${channel.parent ? `'${channel.parent.id}'` : "NULL"}, 'store', '${channel.name}', '${channel.position}');`
 			InsertLogChannels += `('${channel.id}', 'store', 'add', '${executor ? executor : "NULL"}')`;
 		}
@@ -713,7 +716,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 				ChannelPermissionsQuery += `('${channel.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 			})
 
-			GuildToChannelQuery += `('${this.GuildId}', '${channel.id}')`;
+			GuildToChannelQuery += `('${channel.guild.id}', '${channel.id}')`;
 			InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, name, position) VALUES ('${channel.id}', ${channel.parent ? `'${channel.parent.id}'` : "NULL"}, 'news', '${channel.name}', '${channel.position}');`
 			InsertLogChannels += `('${channel.id}', 'news', 'add', '${executor ? executor : "NULL"}')`;
 		} else {
@@ -755,7 +758,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 				})
 
-				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
+				GuildToChannelQuery += `('${element.guild.id}', '${element.id}'),`;
 				InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, name, position, topic, nsfw, rate_limit_per_user) VALUES ('${element.id}', ${element.parent ? `'${element.parent.id}'` : "NULL"}, 'text', '${element.name}', '${element.position}', '${element.topic}', '${element.nsfw ? 1 : 0}', '${element.rateLimitPerUser}');`
 
 			}
@@ -764,7 +767,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 				})
 
-				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
+				GuildToChannelQuery += `('${element.guild.id}', '${element.id}'),`;
 				InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, name, bitrate, user_limit, position) VALUES ('${element.id}', ${element.parent ? `'${element.parent.id}'` : "NULL"}, 'voice', '${element.name}', '${element.bitrate}', '${element.userLimit}', '${element.position}');`
 			}
 			else if (element instanceof CategoryChannel) {
@@ -772,7 +775,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 				})
 
-				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
+				GuildToChannelQuery += `('${element.guild.id}', '${element.id}'),`;
 				InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, position, name) VALUES ('${element.id}', ${element.parent ? `'${element.parent.id}'` : "NULL"}, 'category', '${element.position}', '${element.name}');`
 			}
 			else if (element instanceof DMChannel) {
@@ -783,7 +786,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 				})
 
-				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
+				GuildToChannelQuery += `('${element.guild.id}', '${element.id}'),`;
 				InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, name, position) VALUES ('${element.id}', ${element.parent ? `'${element.parent.id}'` : "NULL"}, 'store', '${element.name}', '${element.position}');`
 			}
 			else if (element instanceof NewsChannel) {
@@ -791,7 +794,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 					ChannelPermissionsQuery += `('${element.id}', '${permission.id}', '${permission.type}', '${permission.allow.bitfield}', '${permission.deny.bitfield}'),`
 				})
 
-				GuildToChannelQuery += `('${this.GuildId}', '${element.id}'),`;
+				GuildToChannelQuery += `('${element.guild.id}', '${element.id}'),`;
 				InsertChannelQuery += `INSERT INTO channels (channel_id, parent, types, name, position) VALUES ('${element.id}', ${element.parent ? `'${element.parent.id}'` : "NULL"}, 'news', '${element.name}', '${element.position}');`
 			} else {
 				// Either GroupDM channel or unkown
@@ -828,7 +831,7 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 		roles.forEach((element) => {
 			InsertRoles += `('${element.id}', '${element.name}', '${element.hexColor}', '${element.hoist ? 1 : 0}', '${element.rawPosition}', '${element.managed ? 1 : 0}', '${element.mentionable ? 1 : 0}', '${element.permissions.bitfield}'),`;
 
-			InsertRoleToGuild += `('${element.id}', '${this.GuildId}'),`;
+			InsertRoleToGuild += `('${element.id}', '${element.guild.id}'),`;
 		})
 
 		InsertRoles = `${InsertRoles.slice(0, -1)};`;
@@ -974,17 +977,16 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 	/**
 	 * Get ALL channels in the guild
 	 */
-	public async GetChannels(GuildId: string): Promise<Set<string>> {
-		if (GuildId === undefined) {
-			this.AddLog("guildId was undefined", LogTypes.general_log);
-		}
-
+	public async GetChannels(): Promise<Set<string>> {
 		const ChannelMap = new Set<string>();
+		let sql = "SELECT channels.channel_id FROM channels LEFT JOIN guild_to_channel ON guild_to_channel.channel_id = channels.channel_id	WHERE is_deleted = 0 AND guild_to_channel.guild_id IN ("
+		this.Guilds.forEach((element, key) => {
+			sql += `'${key}',`;
+		})
+
+		sql = sql.slice(0, -1) + ");";
 		// Get all non deleted channels
-		const Channels = (await this.GetQuery(
-			`SELECT channels.channel_id FROM channels LEFT JOIN guild_to_channel ON guild_to_channel.channel_id = channels.channel_id
-			WHERE guild_to_channel.guild_id = '${GuildId}' AND is_deleted = 0`,
-		) as Array<GuildToChannelsInterface>);
+		const Channels = await this.GetQuery<GuildToChannelsInterface>(sql);
 
 		Channels.forEach((element) => {
 			ChannelMap.add(element.channel_id);
@@ -994,18 +996,31 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 	/**
 	 * Get ALL users in the guild
 	 */
-	public async GetGuildUsers(): Promise<Set<string>> {
-		const GuildUsersSet = new Set<string>();
+	public async GetGuildUsers() {
+		const GuildUsersMap = new Map<string,Set<string>>();
+		let sql = "SELECT user_id, guild_id FROM guild_user WHERE guild_id IN ("
 
-		const GuildUsers = (await this.GetQuery(`
-			SELECT user_id FROM user_to_guild WHERE guild_id = '${this.GuildId}'
-		`) as Array<UsersInterface>)
-
-		GuildUsers.forEach((element) => {
-			GuildUsersSet.add(element.user_id);
+		this.Guilds.forEach((element, key) => {
+			sql += `'${key}',`
 		})
 
-		return GuildUsersSet;
+		sql = sql.slice(0, -1) + ");";
+
+		const GuildUsers = await this.GetQuery<UsersInterface>(sql);
+
+		if (!GuildUsers) {
+			return GuildUsersMap
+		}
+
+		GuildUsers.forEach((element) => {
+			if (GuildUsersMap.has(element.guild_id)) {
+				GuildUsersMap.get(element.guild_id)?.add(element.user_id)
+			} else {
+				GuildUsersMap.set(element.guild_id, new Set([element.user_id]))
+			}
+		})
+
+		return GuildUsersMap;
 	}
 
 	/**
@@ -1013,10 +1028,15 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 	 */
 	public async GetRoles(): Promise<Set<string>> {
 		const RolesSet = new Set<string>();
+		let sql = "SELECT role_id FROM roles_to_guild WHERE guild_id IN ("
 
-		const Roles = (await this.GetQuery(`
-			SELECT role_id FROM roles_to_guild WHERE guild_id = '${this.GuildId}'
-		`) as Array<RolesInterface>);
+		this.Guilds.forEach((element, key) => {
+			sql += `'${key}',`
+		})
+
+		sql = sql.slice(0, -1) + ");";
+
+		const Roles = await this.GetQuery<RolesInterface>(sql);
 
 		Roles.forEach((element) => {
 			RolesSet.add(element.role_id)
@@ -1034,14 +1054,18 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 			})
 		}
 		// Add GuildMembers
-		let InsertGuildUser = "INSERT INTO guild_user (user_id, nickname, display_hex_color) VALUES";
+		let InsertGuildUser = "INSERT INTO guild_user (user_id, guild_id, permissions,  nickname, display_hex_color) VALUES";
 		member.forEach((element) => {
-			InsertGuildUser += `('${element.id}', '${element.nickname ? this.pool.escape(element.nickname) : this.pool.escape(element.user.username)}', '${element.displayHexColor}'),`;
+			InsertGuildUser += `('${element.id}', '${element.guild.id}', ${element.permissions.bitfield}, ${element.nickname ? this.pool.escape(element.nickname) : this.pool.escape(element.user.username)}, '${element.displayHexColor}'),`;
 		})
 
 		InsertGuildUser = `${InsertGuildUser.slice(0, -1)};`;
 
 		await this.GetQuery(InsertGuildUser);
+	}
+
+	public async AddGuildMember(member: GuildMember) {
+		throw new Error("Method not implemented.");
 	}
 
 	// User refers to the the the discord account. It has no assosiation with the guilds(servers) the user is in.
@@ -1052,46 +1076,87 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 				console.log(`User id: ${value.id} added`)
 			})
 		}
-
 		// Inserts the user. This the global user and not a GuildMember
 		let InsertUsers = "INSERT IGNORE INTO users (id, username, discriminator, avatar, bot) VALUES";
 		// Link the user to a guild
-		let InsertUsersToGuild = "INSERT INTO user_to_guild (user_id, guild_id, permissions) VALUES";
+		let InsertGuildUser = "INSERT INTO guild_user (user_id, guild_id, permissions, nickname, display_hex_color) VALUES";
 
 		Users.forEach((element) => {
 			InsertUsers += `('${element.id}', '${element.user.username}', '${element.user.discriminator}','${element.user.avatar}' , ${element.user.bot ? 1 : 0}),`
-			InsertUsersToGuild += `('${element.id}', '${this.GuildId}', ${element.permissions.bitfield}),`
+			InsertGuildUser += `('${element.id}', '${element.guild.id}', ${element.permissions.bitfield}, ${element.nickname ? this.pool.escape(element.nickname) : this.pool.escape(element.user.username)}, '${element.displayHexColor}'),`
 		})
 		// , -> ;
 		InsertUsers = `${InsertUsers.slice(0, -1)};`;
-		InsertUsersToGuild = `${InsertUsersToGuild.slice(0, -1)};`;
+		InsertGuildUser = `${InsertGuildUser.slice(0, -1)};`;
 
-		await this.GetQuery(`${InsertUsers} ${InsertUsersToGuild}`);
+		await this.GetQuery(`${InsertUsers} ${InsertGuildUser}`);
+	}
+
+	public async AddUser(member: GuildMember) {
+		throw new Error("Method not implemented.");
 	}
 
 	// GuildMember is removed from a guild. That member will be removed from that guild
 	// BUT the User will stay in the databse as he may be in other guild
-	public async RemoveGuildMembersFromGuild(GuildMember: Set<string>, executor: string | null = null) {
-		let RemoveUsersFromGuild = `DELETE FROM user_to_guild WHERE guild_id = ${this.GuildId}`;
-		GuildMember.forEach((element) => {
-			RemoveUsersFromGuild += ` AND user_id = ${element}`;
+	public async RemoveGuildMembersFromGuild(GuildMembers: Map<string, Set<string>>, executor: string | null = null) {
+		let sql = "";
+		GuildMembers.forEach((setIds, keyMap) => {
+			sql += `DELETE FROM guild_user WHERE guild_id IN ('${keyMap}') AND user_id IN (`;
+			setIds.forEach((id, keySet) => {
+				sql += `'${keySet}',`
+			})
+			sql += ");"
 		})
 
-		RemoveUsersFromGuild += ";";
+		this.GetQuery(sql);
+	}
+	// TODO: add executor
+	public async RemoveGuildMemberFromGuild(member: GuildMember | PartialGuildMember, executor: string | null = null) {
+		let RemoveUserFromGuild = `DELETE FROM guild_user WHERE guild_id = ${member.guild.id} AND user_id = ${member.id};`;
 
-		this.GetQuery(RemoveUsersFromGuild);
+		this.GetQuery(RemoveUserFromGuild);
 	}
 
-	public async FirstTimeInGuild(GuildId: string): Promise<boolean> {
-		const guild = await this.GetQuery(
-			`SELECT * FROM guilds WHERE id = "${GuildId}"`,
-		);
+	/**
+	 * All the guild that the bot is present in will be stored in the client.guilds.cache
+	 * we query the DB for all the guilds the bot is in and check if the real result match our db
+	 */
+	public async FirstTimeInGuild(discordGuilds: Collection<string, Guild>) {
+		const GuildsMap = new Set<string>();
+		let sql = "SELECT * FROM guilds WHERE id IN ("
+		const guildsToAdd: Guild[] = [];
+		discordGuilds.forEach((element, key) => {
+			sql += `'${key}',`;
+		});
+		sql = sql.slice(0, -1) + ");";
+		// Get all DB guilds
+		const guild = await this.GetQuery<DBGuild>(sql);
+		guild.forEach((element, key) => {
+			GuildsMap.add(element.id)
+		});
+		client.guilds.cache.forEach((element, key) => {
+			if (!GuildsMap.has(key)) {
+				guildsToAdd.push(element)
+			}
+			GuildsMap.delete(key)
+		})
 
-		if (guild.length > 0) {
-			return false;
-		} else {
-			return true;
+		if (guildsToAdd.length > 0) {
+			await this.AddGuilds(guildsToAdd);
 		}
+	}
+	public async AddGuilds(guildsToAdd: Guild[]) {
+		let sql = "INSERT INTO guilds (id, name, icon, owner_id) VALUES "
+
+		for (let i = 0, n = guildsToAdd.length; i < n; i++) {
+			sql += `('${guildsToAdd[i].id}', '${guildsToAdd[i].name}', '${guildsToAdd[i].icon}', '${guildsToAdd[i].ownerID}'),`
+		}
+
+		sql = `${sql.slice(0, -1)}`;
+		sql += " ON DUPLICATE KEY UPDATE owner_id=VALUES(owner_id), bot_active = 1;"
+
+		await this.GetQuery(sql);
+
 	}
 	public async AddGuild(Guild: Guild) {
 		// Guild may already be present from discord auth. Indicate that the bot is present in the guild
@@ -1271,7 +1336,9 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 	}
 
 	public async AddUserBossMusic(user_id: string, fileName: string) {
-		const sql = `INSERT INTO guild_user_boss_music (user_id, song_name) VALUES ('${user_id}', '${fileName}')`;
+		const sql = `INSERT IGNORE INTO guild_user_boss_music (user_id, song_name) VALUES ('${user_id}', '${fileName}.ogg') ON DUPLICATE KEY UPDATE song_name = '${fileName}.ogg'`;
+
+		await this.GetQuery(sql)
 	}
 
 	public async UpdateUserBossMusic(user_id: string, fileName: string) {
@@ -1285,6 +1352,14 @@ VALUES ('${message.id}', ${this.pool.escape(message.content)}, '${message.author
 
 export default DB;
 
+
+interface DBGuild {
+	id: string,
+	name: string,
+	owner_id: string | null,
+	icon: string | null,
+	bot_active: boolean
+}
 
 interface ChannelMessage {
 	id: string,
@@ -1312,7 +1387,8 @@ interface ChannelsInterface {
 }
 
 interface UsersInterface {
-	user_id: string
+	user_id: string,
+	guild_id: string
 }
 
 interface RolesInterface {

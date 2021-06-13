@@ -424,7 +424,10 @@ function AddMusicViaYTLink(args: string[], msg: Message) {
 	let start = convert(time[0]);
 	let finish = convert(time[1]);
 
-	if (finish - start > 20) {
+	console.log(start)
+	console.log(finish)
+
+	if (finish - start > 20 ) {
 		// No timestamps provided
 		msg.reply("Max 20 seconds");
 		return;
@@ -453,7 +456,7 @@ function ConvertFFmpeg(dest: string, user_id: string, fileName: string, start: n
 	command.on('start', (a) => {
 		console.log(a);
 	})
-	.inputOptions([`-ss ${start}`, `-t ${end}`])
+	.inputOptions([`-ss ${start}`, `-t ${end - start}`])
 	// the other functions set the output options and it wont work otherwise
 	.outputOptions(['-c:a libopus', '-b:a 96k'])
 	.on('start', function (commandLine) {
@@ -467,7 +470,7 @@ function ConvertFFmpeg(dest: string, user_id: string, fileName: string, start: n
 				return;
 			}
 		});
-		database.UpdateUserBossMusic(user_id, fileName);
+		database.AddUserBossMusic(user_id, fileName);
 		HasBossMusic.set(msg.member?.id!, fileName + '.ogg');
 
 		msg.reply("Ok piss");
