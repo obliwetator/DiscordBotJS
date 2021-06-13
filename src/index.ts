@@ -41,7 +41,6 @@ const DEBUG_ENABLED = false;
 //     console.log('Bot received: %s', data);
 // });
 
-// TODO: get all guild keys not just the first
 async function handleGuild(): Promise<void> {
 	const guilds = client.guilds.cache
 	database.Guilds = client.guilds.cache
