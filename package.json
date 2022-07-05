@@ -22,7 +22,7 @@
 	},
 	"homepage": "https://github.com/PatrykStyla/DiscordBotJS#readme",
 	"dependencies": {
-		"@discordjs/opus": "^0.3.2",
+		"@discordjs/opus": "^0.8.0",
 		"@types/mysql": "^2.15.18",
 		"@types/node": "^14.14.39",
 		"@types/ws": "^7.4.1",
