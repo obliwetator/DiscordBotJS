@@ -32,7 +32,7 @@
 		"fluent-ffmpeg": "^2.1.2",
 		"libsodium-wrappers": "^0.7.9",
 		"mysql": "^2.18.1",
-		"protobufjs": "~6.10.2",
+		"protobufjs": "~6.10.3",
 		"sodium": "^3.0.2",
 		"ytdl-core": "^4.5.0"
 	},
